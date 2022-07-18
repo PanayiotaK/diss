@@ -187,13 +187,13 @@ def get_config():
                       # num_layers in [1, 3]
                       # magnitude in [5, 30]
                       # Set randaugment to None to disable.
-                      randaugment=dict(
-                          num_layers=4,
-                          magnitude=5),
+                      randaugment=None, #dict(
+                      #     num_layers=4,
+                      #     magnitude=5),
                       cutmix=False,
                       # Mixup alpha should be in [0, 1].
                       # Set to None to disable.
-                      mixup_alpha=0.2,
+                      mixup_alpha=None,
                   ),
                   ),
               evaluation=dict(

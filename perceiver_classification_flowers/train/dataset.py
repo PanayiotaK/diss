@@ -112,9 +112,9 @@ def load(
     out = {'images': image, 'labels': label}
 
     if is_training:
-      if augmentation_settings['cutmix']:
-        out['mask'] = cutmix_padding(*im_size)
-        out['cutmix_ratio'] = tf.reduce_mean(out['mask'])
+      # if augmentation_settings['cutmix']:
+      #   out['mask'] = cutmix_padding(*im_size)
+      #   out['cutmix_ratio'] = tf.reduce_mean(out['mask'])
       if augmentation_settings['mixup_alpha'] is not None:
         beta = tfp.distributions.Beta(
             augmentation_settings['mixup_alpha'],
@@ -278,10 +278,10 @@ def _preprocess_image(
 
   # Get the image crop.
   if is_training:
-    image, im_shape = _decode_and_random_crop(image_bytes)
+    image, im_shape = _decode_whole_image(image_bytes)
     image = tf.image.random_flip_left_right(image)
   else:
-    image, im_shape = _decode_and_center_crop(image_bytes)
+    image, im_shape = _decode_whole_image(image_bytes)
   assert image.dtype == tf.uint8
 
   # Optionally apply RandAugment: https://arxiv.org/abs/1909.13719
@@ -347,36 +347,36 @@ def _distorted_bounding_box_crop(
   return image, im_shape
 
 
-# def _decode_whole_image(image_bytes: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
-#   image = tf.io.decode_jpeg(image_bytes, channels=3)
-#   im_shape = tf.io.extract_jpeg_shape(image_bytes, output_type=tf.int32)
-#   return image, im_shape
-
-
-def _decode_and_random_crop(
-    image_bytes: tf.Tensor
-) -> Tuple[tf.Tensor, tf.Tensor]:
-  """Make a random crop of INPUT_DIM."""
-
-  if image_bytes.dtype == tf.dtypes.string:
-    jpeg_shape = tf.image.extract_jpeg_shape(image_bytes)
-  else:
-    jpeg_shape = tf.shape(image_bytes)
-
-  bbox = tf.constant([0.0, 0.0, 1.0, 1.0], dtype=tf.float32, shape=[1, 1, 4])
-  image, im_shape = _distorted_bounding_box_crop(
-      image_bytes,
-      jpeg_shape=jpeg_shape,
-      bbox=bbox,
-      min_object_covered=0.1,
-      aspect_ratio_range=(3 / 4, 4 / 3),
-      area_range=(0.08, 1.0),
-      max_attempts=10)
-
-  if tf.reduce_all(tf.equal(jpeg_shape, tf.shape(image))):
-    # If the random crop failed fall back to center crop.
-    image, im_shape = _decode_and_center_crop(image_bytes, jpeg_shape)
+def _decode_whole_image(image_bytes: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+  image = tf.io.decode_jpeg(image_bytes, channels=3)
+  im_shape = tf.io.extract_jpeg_shape(image_bytes, output_type=tf.int32)
   return image, im_shape
+
+
+# def _decode_and_random_crop(
+#     image_bytes: tf.Tensor
+# ) -> Tuple[tf.Tensor, tf.Tensor]:
+#   """Make a random crop of INPUT_DIM."""
+
+#   if image_bytes.dtype == tf.dtypes.string:
+#     jpeg_shape = tf.image.extract_jpeg_shape(image_bytes)
+#   else:
+#     jpeg_shape = tf.shape(image_bytes)
+
+#   bbox = tf.constant([0.0, 0.0, 1.0, 1.0], dtype=tf.float32, shape=[1, 1, 4])
+#   image, im_shape = _distorted_bounding_box_crop(
+#       image_bytes,
+#       jpeg_shape=jpeg_shape,
+#       bbox=bbox,
+#       min_object_covered=0.1,
+#       aspect_ratio_range=(3 / 4, 4 / 3),
+#       area_range=(0.08, 1.0),
+#       max_attempts=10)
+
+#   if tf.reduce_all(tf.equal(jpeg_shape, tf.shape(image))):
+#     # If the random crop failed fall back to center crop.
+#     image, im_shape = _decode_and_center_crop(image_bytes, jpeg_shape)
+#   return image, im_shape
 
 
 # def _center_crop(image, crop_dim):
@@ -389,35 +389,35 @@ def _decode_and_random_crop(
 #       image, offset_height, offset_wlabelth, crop_dim, crop_dim)
 
 
-def _decode_and_center_crop(
-    image_bytes: tf.Tensor,
-    jpeg_shape: Optional[tf.Tensor] = None,
-) -> Tuple[tf.Tensor, tf.Tensor]:
-  """Crops to center of image with padding then scales."""
-  if jpeg_shape is None:
-    if image_bytes.dtype == tf.dtypes.string:
-      jpeg_shape = tf.image.extract_jpeg_shape(image_bytes)
-    else:
-      jpeg_shape = tf.shape(image_bytes)
+# def _decode_and_center_crop(
+#     image_bytes: tf.Tensor,
+#     jpeg_shape: Optional[tf.Tensor] = None,
+# ) -> Tuple[tf.Tensor, tf.Tensor]:
+#   """Crops to center of image with padding then scales."""
+#   if jpeg_shape is None:
+#     if image_bytes.dtype == tf.dtypes.string:
+#       jpeg_shape = tf.image.extract_jpeg_shape(image_bytes)
+#     else:
+#       jpeg_shape = tf.shape(image_bytes)
 
-  image_height = jpeg_shape[0]
-  image_wlabelth = jpeg_shape[1]
+#   image_height = jpeg_shape[0]
+#   image_wlabelth = jpeg_shape[1]
 
-  padded_center_crop_size = tf.cast(
-      ((INPUT_DIM / (INPUT_DIM + 32)) *
-       tf.cast(tf.minimum(image_height, image_wlabelth), tf.float32)), tf.int32)
+  # padded_center_crop_size = tf.cast(
+  #     ((INPUT_DIM / (INPUT_DIM + 32)) *
+  #      tf.cast(tf.minimum(image_height, image_wlabelth), tf.float32)), tf.int32)
 
-  offset_height = ((image_height - padded_center_crop_size) + 1) // 2
-  offset_wlabelth = ((image_wlabelth - padded_center_crop_size) + 1) // 2
-  crop_window = [offset_height, offset_wlabelth,
-                 padded_center_crop_size, padded_center_crop_size]
+  # offset_height = ((image_height - padded_center_crop_size) + 1) // 2
+  # offset_wlabelth = ((image_wlabelth - padded_center_crop_size) + 1) // 2
+  # crop_window = [offset_height, offset_wlabelth,
+  #                padded_center_crop_size, padded_center_crop_size]
 
-  if image_bytes.dtype == tf.dtypes.string:
-    image = tf.image.decode_and_crop_jpeg(image_bytes,
-                                          tf.stack(crop_window),
-                                          channels=3)
-  else:
-    image = tf.image.crop_to_bounding_box(image_bytes, *crop_window)
+  # if image_bytes.dtype == tf.dtypes.string:
+  #   image = tf.image.decode_and_crop_jpeg(image_bytes,
+  #                                         tf.stack(crop_window),
+  #                                         channels=3)
+  # else:
+  #   image = tf.image.crop_to_bounding_box(image_bytes, *crop_window)
 
-  im_shape = tf.stack([padded_center_crop_size, padded_center_crop_size])
-  return image, im_shape
+  # im_shape = tf.stack([padded_center_crop_size, padded_center_crop_size])
+  # return image, im_shape
