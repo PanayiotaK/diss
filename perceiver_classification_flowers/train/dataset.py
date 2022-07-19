@@ -1,23 +1,3 @@
-# Copyright 2021 DeepMind Technologies Limited
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-"""ImageNet dataset with pre-processing and augmentation.
-
-Deng, et al CVPR 2009 - ImageNet: A large-scale hierarchical image database.
-https://image-net.org/
-"""
-
 import enum
 from typing import Any, Generator, Mapping, Optional, Sequence, Text, Tuple
 
@@ -110,30 +90,9 @@ def load(
     label = tf.cast(example['label'], tf.int32)
 
     out = {'images': image, 'labels': label}
-
-    if is_training:
-    
-      if augmentation_settings['mixup_alpha'] is not None:
-        beta = tfp.distributions.Beta(
-            augmentation_settings['mixup_alpha'],
-            augmentation_settings['mixup_alpha'])
-        out['mixup_ratio'] = beta.sample()
     return out
 
   ds = ds.map(crop_augment_preprocess, num_parallel_calls=AUTOTUNE)
-
-  # Mixup/cutmix by temporarily batching (using the per-device batch size):
-  use_cutmix = augmentation_settings['cutmix']
-  use_mixup = augmentation_settings['mixup_alpha'] is not None
-  if is_training and (use_cutmix or use_mixup):
-    inner_batch_size = batch_dims[-1]
-    # Apply mixup, cutmix, or mixup + cutmix on batched data.
-    # We use data from 2 batches to produce 1 mixed batch.
-    ds = ds.batch(inner_batch_size * 2)
-    if not use_cutmix and use_mixup:
-      ds = ds.map(my_mixup, num_parallel_calls=AUTOTUNE)
-    # Unbatch for further processing.
-    ds = ds.unbatch()
 
   for batch_size in reversed(batch_dims):
     ds = ds.batch(batch_size)
@@ -141,19 +100,6 @@ def load(
   ds = ds.prefetch(AUTOTUNE)
 
   yield from tfds.as_numpy(ds)
-
-
-def my_mixup(batch):
-  """Apply mixup: https://arxiv.org/abs/1710.09412."""
-  batch = dict(**batch)
-  bs = tf.shape(batch['images'])[0] // 2
-  ratio = batch['mixup_ratio'][:bs, None, None, None]
-  images = (ratio * batch['images'][:bs] + (1.0 - ratio) * batch['images'][bs:])
-  mix_labels = batch['labels'][bs:]
-  labels = batch['labels'][:bs]
-  ratio = ratio[..., 0, 0, 0]  # Unsqueeze
-  return {'images': images, 'labels': labels,
-          'mix_labels': mix_labels, 'ratio': ratio}
 
 
 def _to_tfds_split(split: Split) -> tfds.Split:
@@ -200,24 +146,10 @@ def _preprocess_image(
     image, im_shape = _decode_whole_image(image_bytes)
   assert image.dtype == tf.uint8
 
-  # # Optionally apply RandAugment: https://arxiv.org/abs/1909.13719
-
-  # Resize and normalize the image crop.
-  # NOTE: Bicubic resize (1) casts uint8 to float32 and (2) resizes without
-  # clamping overshoots. This means values returned will be outslabele the range
-  # [0.0, 255.0] (e.g. we have observed outputs in the range [-51.1, 336.6]).
   image = tf.image.resize(
       image, image_size, tf.image.ResizeMethod.BICUBIC)
-  image = _normalize_image(image)
 
   return image, im_shape
-
-
-def _normalize_image(image: tf.Tensor) -> tf.Tensor:
-  """Normalize the image to zero mean and unit variance."""
-  image -= tf.constant(MEAN_RGB, shape=[1, 1, 3], dtype=image.dtype)
-  image /= tf.constant(STDDEV_RGB, shape=[1, 1, 3], dtype=image.dtype)
-  return image
 
 
 
