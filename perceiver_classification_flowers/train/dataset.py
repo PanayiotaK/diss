@@ -1,7 +1,8 @@
 import enum
 from typing import Any, Generator, Mapping, Optional, Sequence, Text, Tuple
-
+import os
 import jax
+import random
 import numpy as np
 import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
@@ -33,8 +34,8 @@ class Split(enum.Enum):
 
   @property
   def num_examples(self):
-    return {Split.TRAIN_AND_VALID: 1020, Split.TRAIN: 1020,
-            Split.VALID: 1020, Split.TEST: 6149}[self]
+    return {Split.TRAIN_AND_VALID: 100, Split.TRAIN: 100,
+            Split.VALID: 100, Split.TEST: 100}[self]
 
 
 def load(
@@ -51,18 +52,27 @@ def load(
     max_intra_op_parallelism: int = 1,
 ) -> Generator[Batch, None, None]:
   """Loads the given split of the dataset."""
-  start, end = _shard(split, jax.host_id(), jax.host_count())
-
+  # start, end = _shard(split, jax.host_id(), jax.host_count())
+  
   im_size = (im_dim, im_dim)
 
   total_batch_size = np.prod(batch_dims)
+  full_list = []
+  if (split == Split.TRAIN or split == Split.TRAIN_AND_VALID ):
+    path = '/content/dataset/train'
+    filenames_list = os.listdir(path)    
+  elif (split == Split.VALID):
+      path = '/content/dataset/valid'
+      filenames_list  = os.listdir(path)      
+  else:
+      path = '/content/dataset/test'
+      filenames_list  = os.listdir(path)
 
-  tfds_split = tfds.core.ReadInstruction(_to_tfds_split(split),
-                                         from_=start, to=end, unit='abs')
+  for file in filenames_list:
+    full_list.append(os.path.join(path,file))
 
-  ds = tfds.load('oxford_flowers102', split=tfds_split,
-                 decoders={'image': tfds.decode.SkipDecoding()})
-
+      
+  ds = dataset_numpy(full_list)
   options = tf.data.Options()
   options.experimental_threading.private_threadpool_size = threadpool_size
   options.experimental_threading.max_intra_op_parallelism = (
@@ -84,11 +94,9 @@ def load(
       raise ValueError(f'Test/vallabel must be divisible by {total_batch_size}')
 
   def crop_augment_preprocess(example):
-    image, _ = _preprocess_image(
-        example['image'], is_training, im_size, augmentation_settings)
-
-    label = tf.cast(example['label'], tf.int32)
-
+    image, _ = example #_preprocess_image(example['image'], is_training, im_size, augmentation_settings)
+    label_init = random.randint(0, 100)
+    label = tf.cast(label_init, tf.int32)
     out = {'images': image, 'labels': label}
     return out
 
@@ -102,61 +110,71 @@ def load(
   yield from tfds.as_numpy(ds)
 
 
-def _to_tfds_split(split: Split) -> tfds.Split:
-  """Returns the TFDS split appropriately sharded."""
-  # NOTE: Imagenet dlabel not release labels for the test split used in the
-  # competition, so it has been typical at DeepMind to conslabeler the VALID
-  # split the TEST split and to reserve 10k images from TRAIN for VALID.
-  if split in (
-      Split.TRAIN, Split.TRAIN_AND_VALID, Split.VALID):
-    return tfds.Split.TRAIN
-  else:
-    assert split == Split.TEST
-    return tfds.Split.VALIDATION
+def dataset_numpy(filenames_list):
+    if filenames_list :
+        # initialize train dataset
+        train_dataset = np.load(filenames_list[0]) 
+        ds = tf.data.Dataset.from_tensor_slices((train_dataset))     
+        # concatenate with the remaining files  
+        for file in filenames_list[1:]: 
+            read_data = np.load(file)
+            add_ds = tf.data.Dataset.from_tensor_slices((read_data))
+            ds = ds.concatenate(add_ds)
+        return ds 
+    else:
+        print("empty list")
+    
+    
+# def _to_tfds_split(split: Split) -> tfds.Split:
+#   """Returns the TFDS split appropriately sharded."""
+#   # NOTE: Imagenet dlabel not release labels for the test split used in the
+#   # competition, so it has been typical at DeepMind to conslabeler the VALID
+#   # split the TEST split and to reserve 10k images from TRAIN for VALID.
+#   if split in (
+#       Split.TRAIN, Split.TRAIN_AND_VALID, Split.VALID):
+#     return tfds.Split.TRAIN
+#   else:
+#     assert split == Split.TEST
+#     return tfds.Split.VALIDATION
 
 
-def _shard(
-    split: Split, shard_index: int, num_shards: int) -> Tuple[int, int]:
-  """Returns [start, end) for the given shard index."""
-  assert shard_index < num_shards
-  arange = np.arange(split.num_examples)
-  shard_range = np.array_split(arange, num_shards)[shard_index]
-  start, end = shard_range[0], (shard_range[-1] + 1)
-  if split == Split.TRAIN:
-    # Note that our TRAIN=TFDS_TRAIN[1020:] and VALID=TFDS_TRAIN[:1020].
-    offset = Split.VALID.num_examples
-    start += offset
-    end += offset
-  return start, end
+# def _shard(
+#     split: Split, shard_index: int, num_shards: int) -> Tuple[int, int]:
+#   """Returns [start, end) for the given shard index."""
+#   assert shard_index < num_shards
+#   arange = np.arange(split.num_examples)
+#   shard_range = np.array_split(arange, num_shards)[shard_index]
+#   start, end = shard_range[0], (shard_range[-1] + 1)
+#   if split == Split.TRAIN:
+#     # Note that our TRAIN=TFDS_TRAIN[1020:] and VALID=TFDS_TRAIN[:1020].
+#     offset = Split.VALID.num_examples
+#     start += offset
+#     end += offset
+#   return start, end
 
 
-def _preprocess_image(
-    image_bytes: tf.Tensor,
-    is_training: bool,
-    image_size: Sequence[int],
-    augmentation_settings: Mapping[str, Any],
-) -> Tuple[tf.Tensor, tf.Tensor]:
-  """Returns processed and resized images."""
+# def _preprocess_image(
+#     image_bytes: tf.Tensor,
+#     is_training: bool,
+#     image_size: Sequence[int],
+#     augmentation_settings: Mapping[str, Any],
+# ) -> Tuple[tf.Tensor, tf.Tensor]:
+#   """Returns processed and resized images."""
 
-  # Get the image crop.
-  if is_training:
-    image, im_shape = _decode_whole_image(image_bytes)
-    image = tf.image.random_flip_left_right(image)
-  else:
-    image, im_shape = _decode_whole_image(image_bytes)
-  assert image.dtype == tf.uint8
+#   # Get the image crop.
+#   if is_training:
+#     image, im_shape = _decode_whole_image(image_bytes)
+#     image = tf.image.random_flip_left_right(image)
+#   else:
+#     image, im_shape = _decode_whole_image(image_bytes)
+#   assert image.dtype == tf.uint8
 
-  image = tf.image.resize(
-      image, image_size, tf.image.ResizeMethod.BICUBIC)
+#   image = tf.image.resize(
+#       image, image_size, tf.image.ResizeMethod.BICUBIC)
 
-  return image, im_shape
+#   return image, im_shape
 
-
-
-def _decode_whole_image(image_bytes: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
-  image = tf.io.decode_jpeg(image_bytes, channels=3)
-  im_shape = tf.io.extract_jpeg_shape(image_bytes, output_type=tf.int32)
-  return image, im_shape
-
-
-
+# def _decode_whole_image(image_bytes: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+#   image = tf.io.decode_jpeg(image_bytes, channels=3)
+#   im_shape = tf.io.extract_jpeg_shape(image_bytes, output_type=tf.int32)
+#   return image, im_shape
