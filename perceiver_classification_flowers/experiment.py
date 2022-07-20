@@ -122,7 +122,7 @@ def get_config():
               model=dict(
                   perceiver_kwargs=dict(
                       input_preprocessor=dict(
-                          prep_type='pixels',
+                          # prep_type='pixels',
                           # Channels for conv/conv1x1 preprocessing:
                           num_channels=64,
                           # -------------------------
@@ -187,13 +187,13 @@ def get_config():
                       # num_layers in [1, 3]
                       # magnitude in [5, 30]
                       # Set randaugment to None to disable.
-                      randaugment=None, #dict(
-                      #     num_layers=4,
-                      #     magnitude=5),
-                      cutmix=False,
+                      randaugment=dict(
+                          num_layers=4,
+                          magnitude=5),
+                      cutmix=True,
                       # Mixup alpha should be in [0, 1].
                       # Set to None to disable.
-                      mixup_alpha=None,
+                      mixup_alpha=0.2,
                   ),
                   ),
               evaluation=dict(
