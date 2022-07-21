@@ -70,16 +70,20 @@ def export_frames(video, frames_out_path, frames_per_segment, frame_start_indice
 
         # load frames_per_segment consecutive frames
         for _ in range(frames_per_segment):
-            image = video[frame_index]
-            image = crop_center_square(image)     
-            image = cv2.resize(image, resize)       
+          try:
+              image = video[frame_index]
+              image = crop_center_square(image)     
+              image = cv2.resize(image, resize)   
+              out =  os.path.join(frames_out_path, "frame_"+str(count)+ "_" + str(frame_index)+".jpg")
               
-            out =  os.path.join(frames_out_path, "frame_"+str(count)+ "_" + str(frame_index)+".jpg")
-            
-            cv2.imwrite(out, image)
-            if frame_index < video.shape[0]:
-                frame_index += 1
-                count += 1
+              cv2.imwrite(out, image)
+              if frame_index < video.shape[0]:
+                  frame_index += 1
+                  count += 1
+                  
+          except Exception as e:
+              print("Error on: ", frames_out_path, " --corrupted--" )
+              print(e)
 
 
 def main(origin_path, num_segments, frames_per_segment, uniform=False):
@@ -100,8 +104,6 @@ def main(origin_path, num_segments, frames_per_segment, uniform=False):
               num_frames = video.shape[0]              
               frame_start_indices = get_start_indices(num_frames, frames_per_segment, num_segments,uniform)                
               export_frames(video, frames_path, frames_per_segment, frame_start_indices, resize=(384,384))
-
-
 
 
 
