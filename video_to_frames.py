@@ -69,8 +69,8 @@ def export_frames(video, frames_out_path, frames_per_segment, frame_start_indice
         frame_index = int(start_index)
 
         # load frames_per_segment consecutive frames
-        for _ in range(frames_per_segment):
-          try:
+        try:
+          for _ in range(frames_per_segment):         
               image = video[frame_index]
               image = crop_center_square(image)     
               image = cv2.resize(image, resize)   
@@ -81,9 +81,9 @@ def export_frames(video, frames_out_path, frames_per_segment, frame_start_indice
                   frame_index += 1
                   count += 1
                   
-          except Exception as e:
-              print("Error on: ", frames_out_path, " --corrupted--" )
-              print(e)
+        except Exception as e:
+            print("Error on: ", frames_out_path, " --corrupted--" )
+            print(e)
 
 
 def main(origin_path, num_segments, frames_per_segment, uniform=True):
@@ -98,12 +98,12 @@ def main(origin_path, num_segments, frames_per_segment, uniform=True):
               if (path.exists(frames_path)):
                  shutil.rmtree(frames_path)
               if(not path.exists(frames_path)):          
-                os.mkdir(frames_path)
-              
+                os.mkdir(frames_path)              
               video = load_all_video_frames(vido_path)
               num_frames = video.shape[0]              
               frame_start_indices = get_start_indices(num_frames, frames_per_segment, num_segments,uniform)                
               export_frames(video, frames_path, frames_per_segment, frame_start_indices, resize=(384,384))
+              # print(frames_path)
 
 
 
