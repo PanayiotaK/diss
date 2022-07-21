@@ -30,7 +30,7 @@ def load_all_video_frames(path, max_frames=0):
   return np.array(frames) #/ 255.0
 
 
-def get_start_indices(num_frames, frames_per_segment, num_segments, uniform=False) :
+def get_start_indices(num_frames, frames_per_segment, num_segments, uniform=True) :
     """
     For each segment, choose a start index from where frames
     are to be loaded from.
@@ -86,7 +86,7 @@ def export_frames(video, frames_out_path, frames_per_segment, frame_start_indice
               print(e)
 
 
-def main(origin_path, num_segments, frames_per_segment, uniform=False):
+def main(origin_path, num_segments, frames_per_segment, uniform=True):
       for categories, subdirs, files in os.walk(origin_path): # "/content/drive/MyDrive/train_vid"   
         for vid_name in files:        
             
@@ -112,5 +112,5 @@ if __name__ == '__main__':
     p.add_argument('--origin_path', type=str, default=None, help='Path to all the videos')
     p.add_argument('--num_segments', type=int, help='Number of segments')
     p.add_argument('--frames_per_segment', type=int, required=True, help='number of consecutive frames per segment.')   
-    p.add_argument('--uniform', type=bool, default=False, required=False, help='uniform sampling.')  
+    p.add_argument('--uniform', type=bool, default=True, required=False, help='uniform sampling.')  
     main(**vars(p.parse_args()))
