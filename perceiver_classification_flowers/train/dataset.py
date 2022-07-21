@@ -94,7 +94,7 @@ def load(
       raise ValueError(f'Test/vallabel must be divisible by {total_batch_size}')
 
   def crop_augment_preprocess(example):
-    image, _ = example #_preprocess_image(example['image'], is_training, im_size, augmentation_settings)
+    image = example #_preprocess_image(example['image'], is_training, im_size, augmentation_settings)
     label_init = random.randint(0, 100)
     label = tf.cast(label_init, tf.int32)
     out = {'images': image, 'labels': label}
