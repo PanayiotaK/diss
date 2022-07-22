@@ -1,27 +1,3 @@
-# Copyright 2021 DeepMind Technologies Limited
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-"""A reference training pipeline for perceiver.Perceiver/perceiver.Perceiver IO on ImageNet.
-
-We use the Jaxline (https://github.com/deepmind/jaxline) training framework.
-Two sets of hyperparameters are provided, the hyperparameters we used for the
-perceiver.Perceiver IO paper, and scaled-down hyperparameters for local testing.
-This script should run out-of-the-box with the local hyper parameters.
-The scaled-up hyperparameters requires a distributed learning setup to run,
-and this script will need to be adapted to your specific setup.
-"""
-
 import functools
 from typing import Generator, Mapping, Text, Tuple
 
@@ -52,11 +28,15 @@ Scalars = Mapping[Text, jnp.ndarray]
 
 
 N_TRAIN_EXAMPLES = dataset.Split.TRAIN_AND_VALID.num_examples
-N_CLASSES = 1000
+N_CLASSES = 700
 # Only local/debug parameters are supported out of the box.
 # To use the scaled-up hyperparameters, please adapt this script to your
 # training setup and set this flag to False
 IS_LOCAL = True
+NUM_FRAMES = 16
+SAMPLES_PER_PATCH = 16
+NUM_CLASSES = 700
+IMG_SZ = 56
 
 
 def get_training_steps(batch_size, n_epochs):
@@ -117,70 +97,76 @@ def get_config():
                       eps=1e-6,
                   ),
               ),
-              # Don't specify output_channels - it's not used for
-              # classifiers.
+          
+
               model=dict(
                   perceiver_kwargs=dict(
-                      input_preprocessor=dict(
-                          # prep_type='pixels',
-                          # Channels for conv/conv1x1 preprocessing:
-                          num_channels=64,
-                          # -------------------------
-                          # Position encoding arguments:
-                          # -------------------------
-                          position_encoding_type='fourier',
-                          concat_or_add_pos='concat',
-                          spatial_downsample=1,
-                          # If >0, project position to this size:
-                          project_pos_dim=-1,
-                          trainable_position_encoding_kwargs=dict(
-                              num_channels=258,  # Match default # for Fourier.
-                              init_scale=0.02,
-                          ),
-                          fourier_position_encoding_kwargs=dict(
-                              num_bands=64,
-                              max_resolution=(224, 224),
-                              sine_only=False,
-                              concat_pos=True,
-                          ),
+                    
+                    input_preprocessor=dict(
+                        min_padding_size=4,
+                        modalities={      
+                        'image': io_processors.ImagePreprocessor(
+                            position_encoding_type='fourier',
+                            fourier_position_encoding_kwargs=dict(
+                                num_bands=32,
+                                max_resolution=(NUM_FRAMES, IMG_SZ, IMG_SZ),
+                                sine_only=False,
+                                concat_pos=True,
+                            ),
+                            n_extra_pos_mlp=0,
+                            prep_type='patches',
+                            spatial_downsample=4,
+                            temporal_downsample=1),
+                        'label': io_processors.OneHotPreprocessor(),
+                        },
+                        mask_probs={'image': 0.0, 'audio': 0.0, 'label': 1.0},
                       ),
+                      
+                      output_postprocessor = dict(
+                        modalities={                            
+                            'image': io_processors.ProjectionPostprocessor(
+                                num_outputs=3),
+                            'label': io_processors.ClassificationPostprocessor(
+                                num_classes=NUM_CLASSES),
+                        }),                       
+
                       encoder=dict(
-                          num_self_attends_per_block=_default_or_debug(6, 2),
-                          # Weights won't be shared if num_blocks is set to 1.
-                          num_blocks=_default_or_debug(8, 2),
-                          z_index_dim=512,
-                          num_z_channels=1024,
-                          num_cross_attend_heads=1,
-                          num_self_attend_heads=8,
-                          cross_attend_widening_factor=1,
-                          self_attend_widening_factor=1,
-                          dropout_prob=0.0,
-                          # Position encoding for the latent array.
-                          z_pos_enc_init_scale=0.02,
-                          cross_attention_shape_for_attn='kv',
-                          use_query_residual=True,
-                          ),
+                        num_self_attends_per_block=8,
+                        # Weights won't be shared if num_blocks is set to 1.
+                        num_blocks=1,
+                        z_index_dim=28*28*1,
+                        num_z_channels=512,
+                        num_cross_attend_heads=1,
+                        num_self_attend_heads=8,
+                        cross_attend_widening_factor=1,
+                        self_attend_widening_factor=1,
+                        dropout_prob=0.0,
+                        z_pos_enc_init_scale=0.02,
+                        cross_attention_shape_for_attn='kv',
+                        name='encoder'
+                        ),
+
                       decoder=dict(
-                          num_z_channels=1024,
-                          use_query_residual=True,
-                          # Position encoding for the output logits.
-                          position_encoding_type='trainable',
-                          trainable_position_encoding_kwargs=dict(
-                              num_channels=1024,
-                              init_scale=0.02,
-                          ),
+                        # Autoencoding, don't pass inputs to the queries.
+                        concat_preprocessed_input=False,                        
+                        # Modality specific decoders are used ONLY to generate queries.
+                        # All modalties are decoded together using a unified decoder.                       
+                        num_outputs=None,
+                        output_num_channels=512,
+                        use_query_residual=False,
                       ),
                   ),
               ),
+            
               training=dict(
-                  images_per_epoch=n_train_examples,
+                  inputs_per_epoch=n_train_examples,
                   label_smoothing=0.1,
                   n_epochs=config.get_oneway_ref('n_epochs'),
                   batch_size=config.get_oneway_ref('train_batch_size')
               ),
               data=dict(
                   num_classes=num_classes,
-                  # Run on smaller images to debug.
+                  # Run on smaller inputs to debug.
                   im_dim=_default_or_debug(224, 32),
                   augmentation=dict(
                       # Typical randaug params:
@@ -266,23 +252,64 @@ class Experiment(experiment.AbstractExperiment):
       self,
       inputs: dataset.Batch,
       is_training: bool,
+      subsampling
   ) -> jnp.ndarray:
 
-    images = inputs['images']
-
+    inputs = inputs['inputs']
+    
+    subsampled_index_dims = {      
+        'image': subsampling['image'].shape[0],
+        'label': 1,
+    }
+    
+    
     perceiver_kwargs = self.config.model.perceiver_kwargs
-    input_preprocessor = io_processors.ImagePreprocessor(
+    output_postprocessor = io_processors.MultimodalPostprocessor(**perceiver_kwargs['output_postprocessor'])
+    input_preprocessor = io_processors.MultimodalPreprocessor(
         **perceiver_kwargs['input_preprocessor'])
     encoder = perceiver.PerceiverEncoder(**perceiver_kwargs['encoder'])
-    decoder = perceiver.ClassificationDecoder(
-        self.config.data.num_classes,
+    decoder = perceiver.MultimodalDecoder(
+        subsampled_index_dims=subsampled_index_dims,
+        modalities={
+                'image': perceiver.BasicVideoAutoencodingDecoder(
+                    concat_preprocessed_input=False,
+                    subsampled_index_dims=subsampling['image'],
+                    output_shape=inputs.shape[:4],
+                    num_z_channels=1024,
+                    output_num_channels=512,
+                    use_query_residual=False,
+                    position_encoding_type='fourier',
+                    fourier_position_encoding_kwargs=dict(
+                    num_bands=32,
+                    max_resolution=(NUM_FRAMES, IMG_SZ, IMG_SZ),
+                    sine_only=False,
+                    concat_pos=True,
+                    ),   
+                ),
+                'label': perceiver.ClassificationDecoder(
+                    # Autoencoding, don't pass inputs to the queries.
+                    concat_preprocessed_input=False,
+                    num_classes=NUM_CLASSES,
+                    num_z_channels=1024,
+                    use_query_residual=False,
+                    position_encoding_type='trainable',
+                    trainable_position_encoding_kwargs=dict(
+                        num_channels=1024,
+                        init_scale=0.02,
+                    ),
+                ),
+            },
         **perceiver_kwargs['decoder'])
+    
     model = perceiver.Perceiver(
-        encoder=encoder,
-        decoder=decoder,
-        input_preprocessor=input_preprocessor)
+      input_preprocessor=input_preprocessor,
+      encoder=encoder,
+      decoder=decoder,
+      output_postprocessor=output_postprocessor)
 
-    return model(images, is_training=is_training)
+    return model({'image': inputs,                
+                'label': np.zeros((inputs.shape[0], 700))},
+               is_training=is_training, subsampled_output_points=subsampling)
 
   #  _             _
   # | |_ _ __ __ _(_)_ __
@@ -313,7 +340,7 @@ class Experiment(experiment.AbstractExperiment):
 
     total_batch_size = self.config.training.batch_size
     steps_per_epoch = (
-        self.config.training.images_per_epoch / self.config.training.batch_size)
+        self.config.training.inputs_per_epoch / self.config.training.batch_size)
     total_steps = self.config.training.n_epochs * steps_per_epoch
     # Scale by the (negative) learning rate.
     self._lr_schedule = utils.get_learning_rate_schedule(
@@ -380,32 +407,59 @@ class Experiment(experiment.AbstractExperiment):
       inputs: dataset.Batch,
       rng: jnp.ndarray,
   ) -> Tuple[jnp.ndarray, Tuple[Scalars, hk.State]]:
-    logits, state = self.forward.apply(
-        params, state, rng, inputs, is_training=True)
+    nchunks = 128
+    reconstruction = {}
+    
+    for chunk_idx in range(nchunks):
+        image_chunk_size = np.prod(inputs.shape[1:-1]) // nchunks
+        
+        subsampling = {
+            'image': jnp.arange(
+                image_chunk_size * chunk_idx, image_chunk_size * (chunk_idx + 1)),
+           
+            'label': None,
+        }
+        
+        output, state = self.forward.apply(
+            params, state, rng, inputs, subsampling, is_training=True)
+    
+        reconstruction['label'] = output['label']
+        if 'image' not in reconstruction:
+            reconstruction['image'] = output['image']
+            reconstruction['audio'] = output['audio']
+        else:
+            reconstruction['image'] = jnp.concatenate(
+                [reconstruction['image'], output['image']], axis=1)
+            reconstruction['audio'] = jnp.concatenate(
+                [reconstruction['audio'], output['audio']], axis=1)
+            
+        reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs.shape)
 
-    label = self._one_hot(inputs['labels'])
+    # label = self._one_hot(inputs['labels'])
     # Handle cutmix/mixup label mixing:
-    if 'mix_labels' in inputs:
-      logging.info('Using mixup or cutmix!')
-      mix_label = self._one_hot(inputs['mix_labels'])
-      mix_ratio = inputs['ratio'][:, None]
-      label = mix_ratio * label + (1. - mix_ratio) * mix_label
+    # if 'mix_labels' in inputs:
+    #   logging.info('Using mixup or cutmix!')
+    #   mix_label = self._one_hot(inputs['mix_labels'])
+    #   mix_ratio = inputs['ratio'][:, None]
+    #   label = mix_ratio * label + (1. - mix_ratio) * mix_label
 
-    # Apply label-smoothing to one-hot labels.
-    label_smoothing = self.config.training.label_smoothing
-    if not (label_smoothing >= 0. and label_smoothing < 1.):
-      raise ValueError(
-          f"'label_smoothing is {label_smoothing} and should be in [0, 1)")
-    if label_smoothing > 0:
-      smooth_positives = 1. - label_smoothing
-      smooth_negatives = label_smoothing / self.config.data.num_classes
-      label = smooth_positives * label + smooth_negatives
+    # # Apply label-smoothing to one-hot labels.
+    # label_smoothing = self.config.training.label_smoothing
+    # if not (label_smoothing >= 0. and label_smoothing < 1.):
+    #   raise ValueError(
+    #       f"'label_smoothing is {label_smoothing} and should be in [0, 1)")
+    # if label_smoothing > 0:
+    #   smooth_positives = 1. - label_smoothing
+    #   smooth_negatives = label_smoothing / self.config.data.num_classes
+    #   label = smooth_positives * label + smooth_negatives
 
-    loss_w_batch = utils.softmax_cross_entropy(logits, label)
+
+######## CHANGE!!!!!!!!!!!!!!! ###################
+    loss_w_batch = utils.softmax_cross_entropy(output, label)
     loss = jnp.mean(loss_w_batch, dtype=loss_w_batch.dtype)
     scaled_loss = loss / jax.device_count()
 
-    metrics = utils.topk_correct(logits, inputs['labels'], prefix='')
+    metrics = utils.topk_correct(output, inputs['labels'], prefix='')
     metrics = jax.tree_map(jnp.mean, metrics)
 
     top_1_acc = metrics['top_1_acc']
@@ -481,18 +535,45 @@ class Experiment(experiment.AbstractExperiment):
       rng: jnp.ndarray,
   ) -> Scalars:
     """Evaluates a batch."""
-    logits, _ = self.forward.apply(
-        params, state, rng, inputs, is_training=False)
+    nchunks = 128
+    reconstruction = {}
+    for chunk_idx in range(nchunks):
+        image_chunk_size = np.prod(inputs.shape[1:-1]) // nchunks
+        
+        subsampling = {
+            'image': jnp.arange(
+                image_chunk_size * chunk_idx, image_chunk_size * (chunk_idx + 1)),
+            
+            'label': None,
+        }
+        output, _ = self.forward.apply(
+            params, state, rng, inputs, subsampling, is_training=False)
+        reconstruction['label'] = output['label']
+        if 'image' not in reconstruction:
+            reconstruction['image'] = output['image']
+            reconstruction['audio'] = output['audio']
+        else:
+            reconstruction['image'] = jnp.concatenate(
+                [reconstruction['image'], output['image']], axis=1)
+            reconstruction['audio'] = jnp.concatenate(
+                [reconstruction['audio'], output['audio']], axis=1)
+        
+    reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs.shape)
+    
+    
+
+    
+    ### CHANGE##############
 
     labels = self._one_hot(inputs['labels'])
-    loss = utils.softmax_cross_entropy(logits, labels)
+    loss = utils.softmax_cross_entropy(output, labels)
 
-    metrics = utils.topk_correct(logits, inputs['labels'], prefix='')
+    metrics = utils.topk_correct(output, inputs['labels'], prefix='')
     metrics = jax.tree_map(jnp.mean, metrics)
     top_1_acc = metrics['top_1_acc']
     top_5_acc = metrics['top_5_acc']
 
-    bs = logits.shape[0]
+    bs = output.shape[0]
 
     top_1_acc = jnp.expand_dims(top_1_acc, axis=0) * bs
     top_5_acc = jnp.expand_dims(top_5_acc, axis=0) * bs
