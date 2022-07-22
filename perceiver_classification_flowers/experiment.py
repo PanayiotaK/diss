@@ -28,14 +28,14 @@ Scalars = Mapping[Text, jnp.ndarray]
 
 
 N_TRAIN_EXAMPLES = dataset.Split.TRAIN_AND_VALID.num_examples
-N_CLASSES = 700
+N_CLASSES = 600
 # Only local/debug parameters are supported out of the box.
 # To use the scaled-up hyperparameters, please adapt this script to your
 # training setup and set this flag to False
 IS_LOCAL = True
 NUM_FRAMES = 16
 SAMPLES_PER_PATCH = 16
-NUM_CLASSES = 700
+NUM_CLASSES = 600
 IMG_SZ = 56
 
 
@@ -101,34 +101,6 @@ def get_config():
 
               model=dict(
                   perceiver_kwargs=dict(
-                    
-                    input_preprocessor=dict(
-                        min_padding_size=4,
-                        modalities={      
-                        'image': io_processors.ImagePreprocessor(
-                            position_encoding_type='fourier',
-                            fourier_position_encoding_kwargs=dict(
-                                num_bands=32,
-                                max_resolution=(NUM_FRAMES, IMG_SZ, IMG_SZ),
-                                sine_only=False,
-                                concat_pos=True,
-                            ),
-                            n_extra_pos_mlp=0,
-                            prep_type='patches',
-                            spatial_downsample=4,
-                            temporal_downsample=1),
-                        'label': io_processors.OneHotPreprocessor(),
-                        },
-                        mask_probs={'image': 0.0, 'audio': 0.0, 'label': 1.0},
-                      ),
-                      
-                      output_postprocessor = dict(
-                        modalities={                            
-                            'image': io_processors.ProjectionPostprocessor(
-                                num_outputs=3),
-                            'label': io_processors.ClassificationPostprocessor(
-                                num_classes=NUM_CLASSES),
-                        }),                       
 
                       encoder=dict(
                         num_self_attends_per_block=8,
@@ -173,13 +145,13 @@ def get_config():
                       # num_layers in [1, 3]
                       # magnitude in [5, 30]
                       # Set randaugment to None to disable.
-                      randaugment=dict(
-                          num_layers=4,
-                          magnitude=5),
-                      cutmix=True,
+                      # randaugment=dict(
+                      #     num_layers=4,
+                      #     magnitude=5),
+                      # cutmix=True,
                       # Mixup alpha should be in [0, 1].
                       # Set to None to disable.
-                      mixup_alpha=0.2,
+                      # mixup_alpha=0.2,
                   ),
                   ),
               evaluation=dict(
@@ -255,18 +227,41 @@ class Experiment(experiment.AbstractExperiment):
       subsampling
   ) -> jnp.ndarray:
 
-    inputs = inputs['inputs']
+    inputs = inputs['images']
     
     subsampled_index_dims = {      
         'image': subsampling['image'].shape[0],
         'label': 1,
     }
     
+      
     
     perceiver_kwargs = self.config.model.perceiver_kwargs
-    output_postprocessor = io_processors.MultimodalPostprocessor(**perceiver_kwargs['output_postprocessor'])
+    output_postprocessor = io_processors.MultimodalPostprocessor(  modalities={                            
+            'image': io_processors.ProjectionPostprocessor(
+                num_outputs=3),
+            'label': io_processors.ClassificationPostprocessor(
+                num_classes=NUM_CLASSES),
+        })
     input_preprocessor = io_processors.MultimodalPreprocessor(
-        **perceiver_kwargs['input_preprocessor'])
+        min_padding_size=4,        
+        modalities={      
+            'image': io_processors.ImagePreprocessor(
+                position_encoding_type= 'fourier',
+                fourier_position_encoding_kwargs=dict(
+                    num_bands=32,
+                    max_resolution=(NUM_FRAMES, IMG_SZ, IMG_SZ),
+                    sine_only=False,
+                    concat_pos=True,
+                ),
+                n_extra_pos_mlp=0,
+                prep_type='patches',
+                spatial_downsample=4,
+                temporal_downsample=1),
+            'label': io_processors.OneHotPreprocessor(),
+        },
+        mask_probs={'image': 0.0, 'audio': 0.0, 'label': 1.0},
+        )
     encoder = perceiver.PerceiverEncoder(**perceiver_kwargs['encoder'])
     decoder = perceiver.MultimodalDecoder(
         subsampled_index_dims=subsampled_index_dims,
@@ -280,10 +275,10 @@ class Experiment(experiment.AbstractExperiment):
                     use_query_residual=False,
                     position_encoding_type='fourier',
                     fourier_position_encoding_kwargs=dict(
-                    num_bands=32,
-                    max_resolution=(NUM_FRAMES, IMG_SZ, IMG_SZ),
-                    sine_only=False,
-                    concat_pos=True,
+                      num_bands=32,
+                      max_resolution=(NUM_FRAMES, IMG_SZ, IMG_SZ),
+                      sine_only=False,
+                      concat_pos=True,
                     ),   
                 ),
                 'label': perceiver.ClassificationDecoder(
@@ -308,7 +303,7 @@ class Experiment(experiment.AbstractExperiment):
       output_postprocessor=output_postprocessor)
 
     return model({'image': inputs,                
-                'label': np.zeros((inputs.shape[0], 700))},
+                'label': np.zeros((inputs.shape[0], 600))},
                is_training=is_training, subsampled_output_points=subsampling)
 
   #  _             _
@@ -355,8 +350,16 @@ class Experiment(experiment.AbstractExperiment):
       logging.info('Initializing parameters.')
 
       inputs = next(self._train_input)
-
-      init_net = jax.pmap(lambda *a: self.forward.init(*a, is_training=True))
+      nchunks = 128
+      image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
+      subsampling = {
+            'image': jnp.arange(
+                image_chunk_size * 0 , image_chunk_size * ( 1)),
+            
+            'label': None,
+        }
+    
+      init_net = jax.pmap(lambda *a: self.forward.init(*a,  subsampling=subsampling, is_training=True))
       init_opt = jax.pmap(self._optimizer.init)
 
       # Init uses the same RNG key on all hosts+devices to ensure everyone
