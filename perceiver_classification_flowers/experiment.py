@@ -1,3 +1,5 @@
+# @title Experiment.py 
+
 import functools
 from typing import Generator, Mapping, Text, Tuple
 
@@ -101,7 +103,6 @@ def get_config():
 
               model=dict(
                   perceiver_kwargs=dict(
-
                       encoder=dict(
                         num_self_attends_per_block=8,
                         # Weights won't be shared if num_blocks is set to 1.
@@ -414,7 +415,7 @@ class Experiment(experiment.AbstractExperiment):
     reconstruction = {}
     
     for chunk_idx in range(nchunks):
-        image_chunk_size = np.prod(inputs.shape[1:-1]) // nchunks
+        image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
         
         subsampling = {
             'image': jnp.arange(
@@ -424,21 +425,20 @@ class Experiment(experiment.AbstractExperiment):
         }
         
         output, state = self.forward.apply(
-            params, state, rng, inputs, subsampling, is_training=True)
+            params, state, rng, inputs, subsampling=subsampling, is_training=True)
     
         reconstruction['label'] = output['label']
         if 'image' not in reconstruction:
             reconstruction['image'] = output['image']
-            reconstruction['audio'] = output['audio']
+            
         else:
             reconstruction['image'] = jnp.concatenate(
                 [reconstruction['image'], output['image']], axis=1)
-            reconstruction['audio'] = jnp.concatenate(
-                [reconstruction['audio'], output['audio']], axis=1)
+          
             
-        reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs.shape)
+        reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs['images'].shape)
 
-    # label = self._one_hot(inputs['labels'])
+    label = self._one_hot(inputs['labels'])
     # Handle cutmix/mixup label mixing:
     # if 'mix_labels' in inputs:
     #   logging.info('Using mixup or cutmix!')
@@ -447,22 +447,22 @@ class Experiment(experiment.AbstractExperiment):
     #   label = mix_ratio * label + (1. - mix_ratio) * mix_label
 
     # # Apply label-smoothing to one-hot labels.
-    # label_smoothing = self.config.training.label_smoothing
-    # if not (label_smoothing >= 0. and label_smoothing < 1.):
-    #   raise ValueError(
-    #       f"'label_smoothing is {label_smoothing} and should be in [0, 1)")
-    # if label_smoothing > 0:
-    #   smooth_positives = 1. - label_smoothing
-    #   smooth_negatives = label_smoothing / self.config.data.num_classes
-    #   label = smooth_positives * label + smooth_negatives
+    label_smoothing = self.config.training.label_smoothing
+    if not (label_smoothing >= 0. and label_smoothing < 1.):
+      raise ValueError(
+          f"'label_smoothing is {label_smoothing} and should be in [0, 1)")
+    if label_smoothing > 0:
+      smooth_positives = 1. - label_smoothing
+      smooth_negatives = label_smoothing / self.config.data.num_classes
+      label = smooth_positives * label + smooth_negatives
 
 
 ######## CHANGE!!!!!!!!!!!!!!! ###################
-    loss_w_batch = utils.softmax_cross_entropy(output, label)
+    loss_w_batch = utils.softmax_cross_entropy(reconstruction['image'], label)
     loss = jnp.mean(loss_w_batch, dtype=loss_w_batch.dtype)
     scaled_loss = loss / jax.device_count()
 
-    metrics = utils.topk_correct(output, inputs['labels'], prefix='')
+    metrics = utils.topk_correct(reconstruction['image'], inputs['labels'], prefix='')
     metrics = jax.tree_map(jnp.mean, metrics)
 
     top_1_acc = metrics['top_1_acc']
@@ -541,7 +541,7 @@ class Experiment(experiment.AbstractExperiment):
     nchunks = 128
     reconstruction = {}
     for chunk_idx in range(nchunks):
-        image_chunk_size = np.prod(inputs.shape[1:-1]) // nchunks
+        image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
         
         subsampling = {
             'image': jnp.arange(
@@ -554,14 +554,14 @@ class Experiment(experiment.AbstractExperiment):
         reconstruction['label'] = output['label']
         if 'image' not in reconstruction:
             reconstruction['image'] = output['image']
-            reconstruction['audio'] = output['audio']
+            # reconstruction['audio'] = output['audio']
         else:
             reconstruction['image'] = jnp.concatenate(
                 [reconstruction['image'], output['image']], axis=1)
-            reconstruction['audio'] = jnp.concatenate(
-                [reconstruction['audio'], output['audio']], axis=1)
+            # reconstruction['audio'] = jnp.concatenate(
+            #     [reconstruction['audio'], output['audio']], axis=1)
         
-    reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs.shape)
+    reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs['images'].shape)
     
     
 
