@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""A reference training pipeline for perceiver.Perceiver/perceiver.Perceiver IO on ImageNet.
+"""A reference training pipeline for Perceiver/Perceiver IO on ImageNet.
 
 We use the Jaxline (https://github.com/deepmind/jaxline) training framework.
 Two sets of hyperparameters are provided, the hyperparameters we used for the
-perceiver.Perceiver IO paper, and scaled-down hyperparameters for local testing.
+Perceiver IO paper, and scaled-down hyperparameters for local testing.
 This script should run out-of-the-box with the local hyper parameters.
 The scaled-up hyperparameters requires a distributed learning setup to run,
 and this script will need to be adapted to your specific setup.
@@ -40,10 +40,10 @@ import numpy as np
 import optax
 
 
-import io_processors
-import perceiver
-from train import dataset
-from train import utils
+from perceiver import io_processors
+from perceiver import perceiver
+from perceiver.train import dataset
+from perceiver.train import utils
 
 FLAGS = flags.FLAGS
 
@@ -122,7 +122,7 @@ def get_config():
               model=dict(
                   perceiver_kwargs=dict(
                       input_preprocessor=dict(
-                          # prep_type='pixels',
+                          prep_type='pixels',
                           # Channels for conv/conv1x1 preprocessing:
                           num_channels=64,
                           # -------------------------
