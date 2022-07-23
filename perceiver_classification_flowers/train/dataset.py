@@ -1,3 +1,4 @@
+# @title dataset.py
 import enum
 from typing import Any, Generator, Mapping, Optional, Sequence, Text, Tuple
 import os
@@ -34,8 +35,8 @@ class Split(enum.Enum):
 
   @property
   def num_examples(self):
-    return {Split.TRAIN_AND_VALID: 100, Split.TRAIN: 100,
-            Split.VALID: 100, Split.TEST: 100}[self]
+    return {Split.TRAIN_AND_VALID: 40, Split.TRAIN: 40,
+            Split.VALID: 40, Split.TEST: 40}[self]
 
 
 def load(
@@ -52,7 +53,7 @@ def load(
     max_intra_op_parallelism: int = 1,
 ) -> Generator[Batch, None, None]:
   """Loads the given split of the dataset."""
-  # start, end = _shard(split, jax.host_id(), jax.host_count())
+  # start, end = _shard(split, jax.host_id(), jax.process_count())
   
   im_size = (im_dim, im_dim)
 
@@ -74,8 +75,8 @@ def load(
       
   ds = dataset_numpy(full_list)
   options = tf.data.Options()
-  options.experimental_threading.private_threadpool_size = threadpool_size
-  options.experimental_threading.max_intra_op_parallelism = (
+  options.threading.private_threadpool_size = threadpool_size
+  options.threading.max_intra_op_parallelism = (
       max_intra_op_parallelism)
   options.experimental_optimization.map_parallelization = True
   if is_training:
@@ -83,7 +84,7 @@ def load(
   ds = ds.with_options(options)
 
   if is_training:
-    if jax.host_count() > 1:
+    if jax.process_count() > 1:
       # Only cache if we are reading a subset of the dataset.
       ds = ds.cache()
     ds = ds.repeat()
@@ -95,7 +96,7 @@ def load(
 
   def crop_augment_preprocess(example):
     image = example #_preprocess_image(example['image'], is_training, im_size, augmentation_settings)
-    label_init = random.randint(0, 100)
+    label_init = random.randint(0, 600)
     label = tf.cast(label_init, tf.int32)
     out = {'images': image, 'labels': label}
     return out
@@ -113,11 +114,14 @@ def load(
 def dataset_numpy(filenames_list):
     if filenames_list :
         # initialize train dataset
-        train_dataset = np.load(filenames_list[0]) 
-        ds = tf.data.Dataset.from_tensor_slices((train_dataset))     
+        train_dataset = np.expand_dims(np.load(filenames_list[0]),axis=0 )
+        print("init shape: ", train_dataset.shape)
+        ds = tf.data.Dataset.from_tensor_slices(train_dataset)    
+        print("read frist file: ", ds)
         # concatenate with the remaining files  
         for file in filenames_list[1:]: 
-            read_data = np.load(file)
+            read_data = np.expand_dims(np.load(file),axis=0 )
+
             add_ds = tf.data.Dataset.from_tensor_slices((read_data))
             ds = ds.concatenate(add_ds)
         return ds 
