@@ -457,11 +457,18 @@ class Experiment(experiment.AbstractExperiment):
       label = smooth_positives * label + smooth_negatives
 
 
-######## CHANGE!!!!!!!!!!!!!!! ###################
-    loss_w_batch = utils.softmax_cross_entropy(reconstruction['label'], label)
-    loss = jnp.mean(loss_w_batch, dtype=loss_w_batch.dtype)
+######## NEW STUFF HERE ###################
+    loss_w_batch_class = utils.softmax_cross_entropy(reconstruction['label'], label)
+    loss_w_batch_images = utils.l1_loss(reconstruction['image'], inputs['images'])
+    
+    loss_images = jnp.mean(loss_w_batch_images, dtype=loss_w_batch_images.dtype)
+    loss_class = jnp.mean(loss_w_batch_class, dtype=loss_w_batch_class.dtype)
+    
+    loss = 0.03*loss_images + 1* loss_class
+    
     scaled_loss = loss / jax.device_count()
 
+## ADD PSNR, SSIM
     metrics = utils.topk_correct(reconstruction['label'], inputs['labels'], prefix='')
     metrics = jax.tree_util.tree_map(jnp.mean, metrics)
 
@@ -566,11 +573,16 @@ class Experiment(experiment.AbstractExperiment):
     
 
     
-    ### CHANGE##############
+    ### NEW ##############
 
     labels = self._one_hot(inputs['labels'])
-    loss = utils.softmax_cross_entropy(reconstruction['label'], labels)
-
+    loss_class = utils.softmax_cross_entropy(reconstruction['label'], labels)
+    loss_images = utils.l1_loss(reconstruction['image'], inputs['images'])
+    
+    loss = 0.03*loss_images + 1* loss_class
+    
+    
+    ## ADD METRICS
     metrics = utils.topk_correct(reconstruction['label'], inputs['labels'], prefix='')
     metrics = jax.tree_util.tree_map(jnp.mean, metrics)
     top_1_acc = metrics['top_1_acc']
