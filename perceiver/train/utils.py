@@ -21,7 +21,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-
+import chex
 
 Batch = Mapping[str, np.ndarray]
 OptState = Tuple[optax.TraceState, optax.ScaleByScheduleState, optax.ScaleState]
@@ -38,6 +38,19 @@ NORM_NAMES = ['layer_norm', 'batchnorm']
 def any_in(prediction, target):
   """For each row in a and b, checks if any element of a is in b."""
   return jnp.isin(prediction, target)
+
+def l1_loss(
+    predictions: chex.Array,
+    targets: Optional[chex.Array] = None,
+) -> chex.Array:
+    
+  chex.assert_type([predictions], float)
+  if targets is not None:
+    # Avoid broadcasting logic for "-" operator.
+    chex.assert_equal_shape((predictions, targets))
+  errors = (predictions - targets) if (targets is not None) else predictions
+  print(jnp.asarray(0.5 * abs(errors)))
+  return jnp.asarray(jnp.sum(0.5 * abs(errors), axis= -1))
 
 
 def topk_correct(logits, labels, mask=None, prefix='', topk=(1, 5)):
