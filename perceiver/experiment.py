@@ -436,7 +436,7 @@ class Experiment(experiment.AbstractExperiment):
                 [reconstruction['image'], output['image']], axis=1)
           
             
-        reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs['images'].shape)
+    reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs['images'].shape)
 
     label = self._one_hot(inputs['labels'])
     # Handle cutmix/mixup label mixing:
@@ -458,12 +458,12 @@ class Experiment(experiment.AbstractExperiment):
 
 
 ######## CHANGE!!!!!!!!!!!!!!! ###################
-    loss_w_batch = utils.softmax_cross_entropy(reconstruction['image'], label)
+    loss_w_batch = utils.softmax_cross_entropy(reconstruction['label'], label)
     loss = jnp.mean(loss_w_batch, dtype=loss_w_batch.dtype)
     scaled_loss = loss / jax.device_count()
 
-    metrics = utils.topk_correct(reconstruction['image'], inputs['labels'], prefix='')
-    metrics = jax.tree_map(jnp.mean, metrics)
+    metrics = utils.topk_correct(reconstruction['label'], inputs['labels'], prefix='')
+    metrics = jax.tree_util.tree_map(jnp.mean, metrics)
 
     top_1_acc = metrics['top_1_acc']
     top_5_acc = metrics['top_5_acc']
@@ -559,7 +559,7 @@ class Experiment(experiment.AbstractExperiment):
             reconstruction['image'] = jnp.concatenate(
                 [reconstruction['image'], output['image']], axis=1)
             # reconstruction['audio'] = jnp.concatenate(
-            #     [reconstruction['audio'], output['audio']], axis=1)
+            
         
     reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs['images'].shape)
     
@@ -569,14 +569,14 @@ class Experiment(experiment.AbstractExperiment):
     ### CHANGE##############
 
     labels = self._one_hot(inputs['labels'])
-    loss = utils.softmax_cross_entropy(output, labels)
+    loss = utils.softmax_cross_entropy(reconstruction['label'], labels)
 
-    metrics = utils.topk_correct(output, inputs['labels'], prefix='')
-    metrics = jax.tree_map(jnp.mean, metrics)
+    metrics = utils.topk_correct(reconstruction['label'], inputs['labels'], prefix='')
+    metrics = jax.tree_util.tree_map(jnp.mean, metrics)
     top_1_acc = metrics['top_1_acc']
     top_5_acc = metrics['top_5_acc']
 
-    bs = output.shape[0]
+    bs = reconstruction['label'].shape[0]
 
     top_1_acc = jnp.expand_dims(top_1_acc, axis=0) * bs
     top_5_acc = jnp.expand_dims(top_5_acc, axis=0) * bs
@@ -607,13 +607,13 @@ class Experiment(experiment.AbstractExperiment):
       scalars = self._eval_batch(params, state, inputs, rng)
 
       # Accumulate the sum of scalars for each step.
-      scalars = jax.tree_map(lambda x: jnp.sum(x, axis=0), scalars)
+      scalars = jax.tree_util.tree_map(lambda x: jnp.sum(x, axis=0), scalars)
       if summed_scalars is None:
         summed_scalars = scalars
       else:
         summed_scalars = jax.tree_multimap(jnp.add, summed_scalars, scalars)
 
-    mean_scalars = jax.tree_map(lambda x: x / num_samples, summed_scalars)
+    mean_scalars = jax.tree_util.tree_map(lambda x: x / num_samples, summed_scalars)
     return mean_scalars
 
 
