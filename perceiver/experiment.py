@@ -17,11 +17,12 @@ from ml_collections import config_dict
 import numpy as np
 import optax
 
-
 import io_processors
 import perceiver
 from train import dataset
 from train import utils
+
+logging.get_absl_handler().use_absl_log_file('logging','./' )
 
 FLAGS = flags.FLAGS
 
@@ -234,9 +235,7 @@ class Experiment(experiment.AbstractExperiment):
         'image': subsampling['image'].shape[0],
         'label': 1,
     }
-    
-      
-    
+        
     perceiver_kwargs = self.config.model.perceiver_kwargs
     output_postprocessor = io_processors.MultimodalPostprocessor(  modalities={                            
             'image': io_processors.ProjectionPostprocessor(
@@ -261,7 +260,7 @@ class Experiment(experiment.AbstractExperiment):
                 temporal_downsample=1),
             'label': io_processors.OneHotPreprocessor(),
         },
-        mask_probs={'image': 0.0, 'audio': 0.0, 'label': 1.0},
+        mask_probs={'image': 0.0,  'label': 1.0},
         )
     encoder = perceiver.PerceiverEncoder(**perceiver_kwargs['encoder'])
     decoder = perceiver.MultimodalDecoder(
