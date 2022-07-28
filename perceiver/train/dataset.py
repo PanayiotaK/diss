@@ -17,7 +17,7 @@ MEAN_RGB = (0.485 * 255, 0.456 * 255, 0.406 * 255)
 STDDEV_RGB = (0.229 * 255, 0.224 * 255, 0.225 * 255)
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
-INPUT_DIM = 224  # The number of pixels in the image resize.
+INPUT_DIM = 384 //16  # The number of pixels in the image resize.
 
 
 class Split(enum.Enum):
