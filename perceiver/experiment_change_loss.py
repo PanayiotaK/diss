@@ -23,6 +23,8 @@ import perceiver
 from train import dataset
 from train import utils
 
+logging.get_absl_handler().use_absl_log_file('logging','./' )
+
 FLAGS = flags.FLAGS
 
 OptState = Tuple[optax.TraceState, optax.ScaleByScheduleState, optax.ScaleState]
@@ -147,7 +149,7 @@ def get_config():
                   ),
               evaluation=dict(
                   subset='test',
-                  batch_size=10,
+                  batch_size=2,
               ),
           )
       )
@@ -162,7 +164,7 @@ def get_config():
   config.save_checkpoint_interval = 20
   config.eval_specific_checkpoint_dir = ''
   config.best_model_eval_metric = 'eval_top_1_acc'
-  config.checkpoint_dir = '/perceiver_checkpoints'
+  config.checkpoint_dir = './'
   config.train_checkpoint_all_hosts = False
 
   # Prevents accidentally setting keys that aren't recognized (e.g. in tests).
@@ -246,7 +248,7 @@ class Experiment(experiment.AbstractExperiment):
                     concat_pos=True,
                 ),
                 n_extra_pos_mlp=0,
-                prep_type='patches',
+                prep_type='pixels',
                 spatial_downsample=4,
                 temporal_downsample=1),
             'label': io_processors.OneHotPreprocessor(),
