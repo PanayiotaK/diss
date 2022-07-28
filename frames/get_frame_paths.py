@@ -6,7 +6,8 @@ import argparse
 
 
 def main(origin_path,out_file_name):
-  out_file = os.path.join(origin_path, out_file_name)
+  partinioned = origin_path.split("original/",1)[1]
+  out_file = os.path.join(origin_path, partinioned+out_file_name) 
   with open(out_file, 'wt', encoding='utf-8') as f:  
     tsv_writer = csv.writer(f, delimiter='\t')     
     for categories, subdirs, files in os.walk(origin_path): # "/content/drive/MyDrive/train_vid" 
