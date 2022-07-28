@@ -38,7 +38,7 @@ IS_LOCAL = False#True
 NUM_FRAMES = 16
 # SAMPLES_PER_PATCH = 16
 NUM_CLASSES = 600
-IMG_SZ = 384 // 16 #56
+IMG_SZ = 24 # 24  #56
 
 
 def get_training_steps(batch_size, n_epochs):
@@ -140,19 +140,9 @@ def get_config():
               data=dict(
                   num_classes=num_classes,
                   # Run on smaller inputs to debug.
-                  im_dim=_default_or_debug(224, 224),
+                  im_dim = _default_or_debug(24, 24),
                   augmentation=dict(
-                      # Typical randaug params:
-                      # num_layers in [1, 3]
-                      # magnitude in [5, 30]
-                      # Set randaugment to None to disable.
-                      # randaugment=dict(
-                      #     num_layers=4,
-                      #     magnitude=5),
-                      # cutmix=True,
-                      # Mixup alpha should be in [0, 1].
-                      # Set to None to disable.
-                      # mixup_alpha=0.2,
+                     
                   ),
                   ),
               evaluation=dict(
@@ -240,7 +230,7 @@ class Experiment(experiment.AbstractExperiment):
     perceiver_kwargs = self.config.model.perceiver_kwargs
     output_postprocessor = io_processors.MultimodalPostprocessor(  modalities={                            
             'image': io_processors.ProjectionPostprocessor(
-                num_outputs=256),
+                num_outputs=1),
             'label': io_processors.ClassificationPostprocessor(
                 num_classes=NUM_CLASSES),
         })
@@ -251,7 +241,7 @@ class Experiment(experiment.AbstractExperiment):
                 position_encoding_type= 'fourier',
                 fourier_position_encoding_kwargs=dict(
                     num_bands=32,
-                    max_resolution=(NUM_FRAMES, IMG_SZ, IMG_SZ),
+                    max_resolution=(NUM_FRAMES, IMG_SZ , IMG_SZ),
                     sine_only=False,
                     concat_pos=True,
                 ),
@@ -277,7 +267,7 @@ class Experiment(experiment.AbstractExperiment):
                     position_encoding_type='fourier',
                     fourier_position_encoding_kwargs=dict(
                       num_bands=32,
-                      max_resolution=(NUM_FRAMES, IMG_SZ, IMG_SZ),
+                      max_resolution=(NUM_FRAMES, IMG_SZ , IMG_SZ),
                       sine_only=False,
                       concat_pos=True,
                     ),   
