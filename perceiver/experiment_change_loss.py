@@ -164,7 +164,7 @@ def get_config():
   config.save_checkpoint_interval = 20
   config.eval_specific_checkpoint_dir = ''
   config.best_model_eval_metric = 'eval_top_1_acc'
-  config.checkpoint_dir = './'
+  config.checkpoint_dir = ''
   config.train_checkpoint_all_hosts = False
 
   # Prevents accidentally setting keys that aren't recognized (e.g. in tests).
@@ -431,13 +431,7 @@ class Experiment(experiment.AbstractExperiment):
     reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs['images'].shape)
 
     label = self._one_hot(inputs['labels'])
-    # Handle cutmix/mixup label mixing:
-    # if 'mix_labels' in inputs:
-    #   logging.info('Using mixup or cutmix!')
-    #   mix_label = self._one_hot(inputs['mix_labels'])
-    #   mix_ratio = inputs['ratio'][:, None]
-    #   label = mix_ratio * label + (1. - mix_ratio) * mix_label
-
+    
     # # Apply label-smoothing to one-hot labels.
     label_smoothing = self.config.training.label_smoothing
     if not (label_smoothing >= 0. and label_smoothing < 1.):
@@ -449,9 +443,15 @@ class Experiment(experiment.AbstractExperiment):
       label = smooth_positives * label + smooth_negatives
 
 
-######## CHANGE!!!!!!!!!!!!!!! ###################
-    loss_w_batch = utils.softmax_cross_entropy(reconstruction['label'], label)
-    loss = jnp.mean(loss_w_batch, dtype=loss_w_batch.dtype)
+######## New stuff here ###################
+    loss_w_batch_class = utils.softmax_cross_entropy(reconstruction['label'], label)
+    loss_w_batch_images = utils.l1_loss(reconstruction['image'], inputs['images'])
+    
+    loss_images = jnp.mean(loss_w_batch_images, dtype=loss_w_batch_images.dtype)
+    loss_class = jnp.mean(loss_w_batch_class, dtype=loss_w_batch_class.dtype)
+    
+    loss = 0.03*loss_images + 1.0* loss_class
+    
     scaled_loss = loss / jax.device_count()
 
     metrics = utils.topk_correct(reconstruction['label'], inputs['labels'], prefix='')
@@ -558,10 +558,13 @@ class Experiment(experiment.AbstractExperiment):
     
 
     
-    ### CHANGE##############
+    ### New stuff here ##############
 
     labels = self._one_hot(inputs['labels'])
-    loss = utils.softmax_cross_entropy(reconstruction['label'], labels)
+    loss_class = utils.softmax_cross_entropy(reconstruction['label'], labels)
+    loss_images = utils.l1_loss(reconstruction['image'], inputs['images'])
+    
+    loss = 0.03*loss_images + 1.0* loss_class
 
     metrics = utils.topk_correct(reconstruction['label'], inputs['labels'], prefix='')
     metrics = jax.tree_util.tree_map(jnp.mean, metrics)
