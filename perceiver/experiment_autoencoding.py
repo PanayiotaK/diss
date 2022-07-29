@@ -16,7 +16,7 @@ from jaxline import utils as jl_utils
 from ml_collections import config_dict
 import numpy as np
 import optax
-
+import jax.tools.colab_tpu
 
 import io_processors
 import perceiver
@@ -42,6 +42,11 @@ NUM_FRAMES = 16
 NUM_CLASSES = 600
 IMG_SZ = 24 # 24  #56
 
+
+jax.tools.colab_tpu.setup_tpu()
+# import jax
+# logging.info("jax backend {}".format(jax.lib.xla_bridge.get_backend().platform))
+# logging.info("devices: [%s] ",jax.devices())
 
 def get_training_steps(batch_size, n_epochs):
   return (N_TRAIN_EXAMPLES * n_epochs) // batch_size
@@ -376,6 +381,8 @@ class Experiment(experiment.AbstractExperiment):
   def _build_train_input(self) -> Generator[dataset.Batch, None, None]:
     """See base class."""
     num_devices = jax.device_count()
+    logging.info('No devices: %d ', num_devices)
+
     global_batch_size = self.config.training.batch_size
     per_device_batch_size, ragged = divmod(global_batch_size, num_devices)
 
