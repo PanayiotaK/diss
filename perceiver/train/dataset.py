@@ -94,14 +94,14 @@ def load(
     if split.num_examples % total_batch_size != 0:
       raise ValueError(f'Test/vallabel must be divisible by {total_batch_size}')
 
-  def crop_augment_preprocess(example):
-    image = example #_preprocess_image(example['image'], is_training, im_size, augmentation_settings)
-    label_init = random.randint(0, 600)
-    label = tf.cast(label_init, tf.int32)
-    out = {'images': image, 'labels': label}
-    return out
+  # def crop_augment_preprocess(example):
+  #   image = example #_preprocess_image(example['image'], is_training, im_size, augmentation_settings)
+  #   label_init = random.randint(0, 600)
+  #   label = tf.cast(label_init, tf.int32)
+  #   out = {'images': image, 'labels': label}
+  #   return out
 
-  ds = ds.map(crop_augment_preprocess, num_parallel_calls=AUTOTUNE)
+  # ds = ds.map(crop_augment_preprocess, num_parallel_calls=AUTOTUNE)
 
   for batch_size in reversed(batch_dims):
     ds = ds.batch(batch_size)
@@ -114,15 +114,18 @@ def load(
 def dataset_numpy(filenames_list):
     if filenames_list :
         # initialize train dataset
-        train_dataset = np.expand_dims(np.load(filenames_list[0]),axis=0 )
-        print("init shape: ", train_dataset.shape)
-        ds = tf.data.Dataset.from_tensor_slices(train_dataset)    
-        print("read frist file: ", ds)
-        # concatenate with the remaining files  
+        tensor_init = np.load(filenames_list[0])
+        image_init = tensor_init['arr_0']
+        class_init = np.expand_dims(tensor_init['arr_1'], axis=0)        
+        video = np.expand_dims(image_init,axis=0 )        
+        ds = tf.data.Dataset.from_tensor_slices({'video':video, 'class' : class_init})   
+        
+        
         for file in filenames_list[1:]: 
-            read_data = np.expand_dims(np.load(file),axis=0 )
-
-            add_ds = tf.data.Dataset.from_tensor_slices((read_data))
+            data = np.load(file)
+            video =  np.expand_dims(data['arr_0'], axis=0)
+            class_no = np.expand_dims(data['arr_1'], axis=0)
+            add_ds = tf.data.Dataset.from_tensor_slices({'video':video, 'class' : class_no})
             ds = ds.concatenate(add_ds)
         return ds 
     else:
