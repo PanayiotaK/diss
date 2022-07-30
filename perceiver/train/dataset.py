@@ -94,14 +94,14 @@ def load(
     if split.num_examples % total_batch_size != 0:
       raise ValueError(f'Test/vallabel must be divisible by {total_batch_size}')
 
-  # def crop_augment_preprocess(example):
+  # def add_random_labels(example):
   #   image = example #_preprocess_image(example['image'], is_training, im_size, augmentation_settings)
   #   label_init = random.randint(0, 600)
   #   label = tf.cast(label_init, tf.int32)
   #   out = {'images': image, 'labels': label}
   #   return out
 
-  # ds = ds.map(crop_augment_preprocess, num_parallel_calls=AUTOTUNE)
+  # ds = ds.map(add_random_labels, num_parallel_calls=AUTOTUNE)
 
   for batch_size in reversed(batch_dims):
     ds = ds.batch(batch_size)
@@ -112,6 +112,9 @@ def load(
 
 
 def dataset_numpy(filenames_list):
+    ''' Function that gets a list of paths of npz files and creates a tf.dataset. 
+    Npz files contain the compressed video and label. 
+    One npz = one video '''    
     if filenames_list :
         # initialize train dataset
         tensor_init = np.load(filenames_list[0])

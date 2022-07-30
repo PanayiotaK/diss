@@ -8,6 +8,7 @@ from absl import flags
 from absl import logging
 import haiku as hk
 import jax
+import jax.tools.colab_tpu
 import jax.numpy as jnp
 from jaxline import base_config
 from jaxline import experiment
@@ -16,7 +17,7 @@ from jaxline import utils as jl_utils
 from ml_collections import config_dict
 import numpy as np
 import optax
-import jax.tools.colab_tpu
+
 
 import io_processors
 import perceiver
@@ -56,7 +57,7 @@ def get_config():
   config = base_config.get_base_config()
 
   # Experiment config.
-  local_batch_size = 2
+  local_batch_size = 8
   # Modify this to adapt to your custom distributed learning setup
   num_devices = 1
   config.train_batch_size = local_batch_size * num_devices
@@ -152,7 +153,7 @@ def get_config():
                   ),
               evaluation=dict(
                   subset='test',
-                  batch_size=2,
+                  batch_size=8,
               ),
           )
       )
@@ -177,7 +178,7 @@ def get_config():
 
 
 class Experiment(experiment.AbstractExperiment):
-  """ImageNet experiment."""
+  """Video autoencoding experiment."""
 
   # A map from object properties that will be checkpointed to their name
   # in a checkpoint. Currently we assume that these are all sharded
@@ -224,21 +225,9 @@ class Experiment(experiment.AbstractExperiment):
   ) -> jnp.ndarray:
 
     inputs = inputs['images']
-    
-    # subsampled_index_dims = {      
-    #     'image': subsampling['image'].shape[0],
-    #     'label': 1,
-    # }
-    
-      
-    
+           
     perceiver_kwargs = self.config.model.perceiver_kwargs
-    output_postprocessor = io_processors.MultimodalPostprocessor(  modalities={                            
-            'image': io_processors.ProjectionPostprocessor(
-                num_outputs=1),
-            'label': io_processors.ClassificationPostprocessor(
-                num_classes=NUM_CLASSES),
-        })
+
     input_preprocessor = io_processors.MultimodalPreprocessor(
         min_padding_size=4,        
         modalities={      
@@ -261,8 +250,7 @@ class Experiment(experiment.AbstractExperiment):
         # subsampled_index_dims=subsampled_index_dims,
         modalities={
                 'image': perceiver.BasicVideoAutoencodingDecoder(
-                    concat_preprocessed_input=False,
-                    # subsampled_index_dims=subsampling['image'],
+                    concat_preprocessed_input=False,                    
                     output_shape=inputs.shape[:4],
                     num_z_channels=1024,
                     output_num_channels=512,
@@ -290,6 +278,12 @@ class Experiment(experiment.AbstractExperiment):
             },
         **perceiver_kwargs['decoder'])
     
+    output_postprocessor = io_processors.MultimodalPostprocessor(  modalities={                            
+        'image': io_processors.ProjectionPostprocessor(
+            num_outputs=1),
+        'label': io_processors.ClassificationPostprocessor(
+            num_classes=NUM_CLASSES),
+    })
     model = perceiver.Perceiver(
       input_preprocessor=input_preprocessor,
       encoder=encoder,
@@ -345,14 +339,7 @@ class Experiment(experiment.AbstractExperiment):
       logging.info('Initializing parameters.')
 
       inputs = next(self._train_input)
-      nchunks = 128
-    #   image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
-    #   subsampling = {
-    #         'image': jnp.arange(
-    #             image_chunk_size * 0 , image_chunk_size * ( 1)),
-            
-    #         'label': None,
-    #     }
+     
     
       init_net = jax.pmap(lambda *a: self.forward.init(*a, is_training=True)) # subsampling=subsampling, ))
       init_opt = jax.pmap(self._optimizer.init)
@@ -410,20 +397,13 @@ class Experiment(experiment.AbstractExperiment):
     # nchunks = 128
     reconstruction = {}
     
-    # for chunk_idx in range(nchunks):
-    #     image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
-        
-    #     subsampling = {
-    #         'image': jnp.arange(
-    #             image_chunk_size * chunk_idx, image_chunk_size * (chunk_idx + 1)),
-           
-    #         'label': None,
-    #     }
         
     output, state = self.forward.apply(
         params, state, rng, inputs,  is_training=True)  #subsampling=subsampling,
 
     reconstruction['label'] = output['label']
+    
+    # improve later - no need for the else part
     if 'image' not in reconstruction:
         reconstruction['image'] = output['image']
         
@@ -536,15 +516,7 @@ class Experiment(experiment.AbstractExperiment):
     """Evaluates a batch."""
     nchunks = 128
     reconstruction = {}
-    # for chunk_idx in range(nchunks):
-    #     image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
-        
-    #     subsampling = {
-    #         'image': jnp.arange(
-    #             image_chunk_size * chunk_idx, image_chunk_size * (chunk_idx + 1)),
-            
-    #         'label': None,
-    #     }
+   
     output, _ = self.forward.apply(
         params, state, rng, inputs, is_training=False) #  subsampling,
     reconstruction['label'] = output['label']

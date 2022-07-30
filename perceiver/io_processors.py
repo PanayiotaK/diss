@@ -457,7 +457,8 @@ class LatentVideoPreprocessor(hk.Module):
     self._concat_or_add_pos = concat_or_add_pos
     
     # Partially construct the positional encoding function.
-    # We fully construct it when we know the input size.
+    # We fully construct it when we know the input size. 
+    # We get input dims when called not initialised 
     self._positional_encoding_ctor = functools.partial(
         position_encoding.build_position_encoding,
         position_encoding_type=position_encoding_type,
@@ -481,7 +482,7 @@ class LatentVideoPreprocessor(hk.Module):
     # Construct the position encoding.
     pos_enc = self._positional_encoding_ctor(
         index_dims=index_dims)(batch_size=batch_size, pos=pos)
-
+    
     for i in range(0, self._n_extra_pos_mlp):
       pos_enc += hk.Linear(pos_enc.shape[-1])(pos_enc)
       if i < (self._n_extra_pos_mlp-1):
