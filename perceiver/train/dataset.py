@@ -118,14 +118,13 @@ def dataset_numpy(filenames_list):
         image_init = tensor_init['arr_0']
         class_init = np.expand_dims(tensor_init['arr_1'], axis=0)        
         video = np.expand_dims(image_init,axis=0 )        
-        ds = tf.data.Dataset.from_tensor_slices({'video':video, 'class' : class_init})   
-        
-        
+        ds = tf.data.Dataset.from_tensor_slices({'images':video, 'labels' : class_init})   
+                
         for file in filenames_list[1:]: 
             data = np.load(file)
             video =  np.expand_dims(data['arr_0'], axis=0)
             class_no = np.expand_dims(data['arr_1'], axis=0)
-            add_ds = tf.data.Dataset.from_tensor_slices({'video':video, 'class' : class_no})
+            add_ds = tf.data.Dataset.from_tensor_slices({'images':video, 'labels' : class_no})
             ds = ds.concatenate(add_ds)
         return ds 
     else:

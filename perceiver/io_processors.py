@@ -420,7 +420,7 @@ class ImagePreprocessor(hk.Module):
         inputs = jnp.squeeze(inputs, axis=1)
 
       if self._conv_after_patching:
-        inputs = hk.Linear(self._num_channels, name='patches_linear')(inputs)
+            inputs = hk.Linear(self._num_channels, name='patches_linear')(inputs)
     elif self._prep_type == 'pixels':
       # if requested, downsamples in the crudest way
       if inputs.ndim == 4:
@@ -436,7 +436,82 @@ class ImagePreprocessor(hk.Module):
         inputs, pos, network_input_is_1d)
     modality_sizes = None  # Size for each modality, only needed for multimodal
     return inputs, modality_sizes, inputs_without_pos
+  
+#############################  
+class LatentVideoPreprocessor(hk.Module):
+  """Just removed unwanted stuff form Image preprocessing"""
+  def __init__(
+      self,      
+      position_encoding_type: str = 'fourier',
+      n_extra_pos_mlp: int = 0,           
+      concat_or_add_pos: str = 'concat',
+      name: Optional[str] = None,
+      **position_encoding_kwargs):
+    super().__init__(name=name)
 
+    if concat_or_add_pos not in ['concat', 'add']:
+        raise ValueError(
+          f'Invalid value {concat_or_add_pos} for concat_or_add_pos.')
+
+
+    self._concat_or_add_pos = concat_or_add_pos
+    
+    # Partially construct the positional encoding function.
+    # We fully construct it when we know the input size.
+    self._positional_encoding_ctor = functools.partial(
+        position_encoding.build_position_encoding,
+        position_encoding_type=position_encoding_type,
+        **position_encoding_kwargs)
+
+    # Stack MLPs to get a deeper positional embedding.
+    self._n_extra_pos_mlp = n_extra_pos_mlp
+
+  def _build_network_inputs(
+      self, inputs: jnp.ndarray, pos: jnp.ndarray,
+      network_input_is_1d: bool = True) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    """Construct the final input, including position encoding."""
+    batch_size = inputs.shape[0]
+    index_dims = inputs.shape[1:-1]
+
+    # Reshape input features to a 1D index dimension if necessary.
+    if len(inputs.shape) > 3 and network_input_is_1d:
+      inputs = jnp.reshape(
+          inputs, [batch_size, np.prod(index_dims), -1])
+
+    # Construct the position encoding.
+    pos_enc = self._positional_encoding_ctor(
+        index_dims=index_dims)(batch_size=batch_size, pos=pos)
+
+    for i in range(0, self._n_extra_pos_mlp):
+      pos_enc += hk.Linear(pos_enc.shape[-1])(pos_enc)
+      if i < (self._n_extra_pos_mlp-1):
+        pos_enc = jax.nn.relu(pos_enc)
+
+    if not network_input_is_1d:
+      # Reshape pos to match the input feature shape
+      # if the network takes non-1D inputs
+      sh = inputs.shape
+      pos_enc = jnp.reshape(pos_enc, list(sh)[:-1]+[-1])
+
+    if self._concat_or_add_pos == 'concat':
+      inputs_with_pos = jnp.concatenate([inputs, pos_enc], axis=-1)
+    elif self._concat_or_add_pos == 'add':
+      inputs_with_pos = inputs + pos_enc
+
+    return inputs_with_pos, inputs
+
+  def __call__(
+      self, inputs: jnp.ndarray, *,
+      is_training: bool,
+      pos: Optional[jnp.ndarray] = None,
+      network_input_is_1d: bool = True) -> PreprocessorOutputT:
+
+    inputs, inputs_without_pos = self._build_network_inputs(
+        inputs, pos, network_input_is_1d)
+    modality_sizes = None  # Size for each modality, only needed for multimodal
+    return inputs, modality_sizes, inputs_without_pos
+
+#############################################
 
 class ImagePostprocessor(hk.Module):
   """Image postprocessing for Perceiver."""
@@ -828,3 +903,5 @@ class EmbeddingDecoder(hk.Module):
     bias = hk.get_parameter('bias', shape=[self._vocab_size], init=jnp.zeros)
     output = output + bias
     return output.reshape([batch_size, seq_len, self._vocab_size])
+
+

@@ -44,9 +44,7 @@ IMG_SZ = 24 # 24  #56
 
 
 jax.tools.colab_tpu.setup_tpu()
-# import jax
-# logging.info("jax backend {}".format(jax.lib.xla_bridge.get_backend().platform))
-# logging.info("devices: [%s] ",jax.devices())
+
 
 def get_training_steps(batch_size, n_epochs):
   return (N_TRAIN_EXAMPLES * n_epochs) // batch_size
@@ -222,15 +220,15 @@ class Experiment(experiment.AbstractExperiment):
       self,
       inputs: dataset.Batch,
       is_training: bool,
-      subsampling
+    #   subsampling
   ) -> jnp.ndarray:
 
     inputs = inputs['images']
     
-    subsampled_index_dims = {      
-        'image': subsampling['image'].shape[0],
-        'label': 1,
-    }
+    # subsampled_index_dims = {      
+    #     'image': subsampling['image'].shape[0],
+    #     'label': 1,
+    # }
     
       
     
@@ -244,7 +242,7 @@ class Experiment(experiment.AbstractExperiment):
     input_preprocessor = io_processors.MultimodalPreprocessor(
         min_padding_size=4,        
         modalities={      
-            'image': io_processors.ImagePreprocessor(
+            'image': io_processors.LatentVideoPreprocessor(
                 position_encoding_type= 'fourier',
                 fourier_position_encoding_kwargs=dict(
                     num_bands=32,
@@ -252,21 +250,19 @@ class Experiment(experiment.AbstractExperiment):
                     sine_only=False,
                     concat_pos=True,
                 ),
-                n_extra_pos_mlp=0,
-                prep_type='pixels',
-                spatial_downsample=4,
-                temporal_downsample=1),
+                n_extra_pos_mlp=0,                
+                ),
             'label': io_processors.OneHotPreprocessor(),
         },
         mask_probs={'image': 0.0, 'label': 1.0},
         )
     encoder = perceiver.PerceiverEncoder(**perceiver_kwargs['encoder'])
     decoder = perceiver.MultimodalDecoder(
-        subsampled_index_dims=subsampled_index_dims,
+        # subsampled_index_dims=subsampled_index_dims,
         modalities={
                 'image': perceiver.BasicVideoAutoencodingDecoder(
                     concat_preprocessed_input=False,
-                    subsampled_index_dims=subsampling['image'],
+                    # subsampled_index_dims=subsampling['image'],
                     output_shape=inputs.shape[:4],
                     num_z_channels=1024,
                     output_num_channels=512,
@@ -302,7 +298,8 @@ class Experiment(experiment.AbstractExperiment):
 
     return model({'image': inputs,                
                 'label': np.zeros((inputs.shape[0], 600))},
-               is_training=is_training, subsampled_output_points=subsampling)
+               is_training=is_training)
+    #, subsampled_output_points=subsampling)
 
   #  _             _
   # | |_ _ __ __ _(_)_ __
@@ -349,15 +346,15 @@ class Experiment(experiment.AbstractExperiment):
 
       inputs = next(self._train_input)
       nchunks = 128
-      image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
-      subsampling = {
-            'image': jnp.arange(
-                image_chunk_size * 0 , image_chunk_size * ( 1)),
+    #   image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
+    #   subsampling = {
+    #         'image': jnp.arange(
+    #             image_chunk_size * 0 , image_chunk_size * ( 1)),
             
-            'label': None,
-        }
+    #         'label': None,
+    #     }
     
-      init_net = jax.pmap(lambda *a: self.forward.init(*a,  subsampling=subsampling, is_training=True))
+      init_net = jax.pmap(lambda *a: self.forward.init(*a, is_training=True)) # subsampling=subsampling, ))
       init_opt = jax.pmap(self._optimizer.init)
 
       # Init uses the same RNG key on all hosts+devices to ensure everyone
@@ -410,29 +407,29 @@ class Experiment(experiment.AbstractExperiment):
       inputs: dataset.Batch,
       rng: jnp.ndarray,
   ) -> Tuple[jnp.ndarray, Tuple[Scalars, hk.State]]:
-    nchunks = 128
+    # nchunks = 128
     reconstruction = {}
     
-    for chunk_idx in range(nchunks):
-        image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
+    # for chunk_idx in range(nchunks):
+    #     image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
         
-        subsampling = {
-            'image': jnp.arange(
-                image_chunk_size * chunk_idx, image_chunk_size * (chunk_idx + 1)),
+    #     subsampling = {
+    #         'image': jnp.arange(
+    #             image_chunk_size * chunk_idx, image_chunk_size * (chunk_idx + 1)),
            
-            'label': None,
-        }
+    #         'label': None,
+    #     }
         
-        output, state = self.forward.apply(
-            params, state, rng, inputs, subsampling=subsampling, is_training=True)
-    
-        reconstruction['label'] = output['label']
-        if 'image' not in reconstruction:
-            reconstruction['image'] = output['image']
-            
-        else:
-            reconstruction['image'] = jnp.concatenate(
-                [reconstruction['image'], output['image']], axis=1)
+    output, state = self.forward.apply(
+        params, state, rng, inputs,  is_training=True)  #subsampling=subsampling,
+
+    reconstruction['label'] = output['label']
+    if 'image' not in reconstruction:
+        reconstruction['image'] = output['image']
+        
+    else:
+        reconstruction['image'] = jnp.concatenate(
+            [reconstruction['image'], output['image']], axis=1)
           
             
     reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs['images'].shape)
@@ -539,27 +536,25 @@ class Experiment(experiment.AbstractExperiment):
     """Evaluates a batch."""
     nchunks = 128
     reconstruction = {}
-    for chunk_idx in range(nchunks):
-        image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
+    # for chunk_idx in range(nchunks):
+    #     image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
         
-        subsampling = {
-            'image': jnp.arange(
-                image_chunk_size * chunk_idx, image_chunk_size * (chunk_idx + 1)),
+    #     subsampling = {
+    #         'image': jnp.arange(
+    #             image_chunk_size * chunk_idx, image_chunk_size * (chunk_idx + 1)),
             
-            'label': None,
-        }
-        output, _ = self.forward.apply(
-            params, state, rng, inputs, subsampling, is_training=False)
-        reconstruction['label'] = output['label']
-        if 'image' not in reconstruction:
-            reconstruction['image'] = output['image']
-            # reconstruction['audio'] = output['audio']
-        else:
-            reconstruction['image'] = jnp.concatenate(
-                [reconstruction['image'], output['image']], axis=1)
-            # reconstruction['audio'] = jnp.concatenate(
-            
-        
+    #         'label': None,
+    #     }
+    output, _ = self.forward.apply(
+        params, state, rng, inputs, is_training=False) #  subsampling,
+    reconstruction['label'] = output['label']
+    if 'image' not in reconstruction:
+        reconstruction['image'] = output['image']
+        # reconstruction['audio'] = output['audio']
+    else:
+        reconstruction['image'] = jnp.concatenate(
+            [reconstruction['image'], output['image']], axis=1)            
+                 
     reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs['images'].shape)
     
     

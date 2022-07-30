@@ -17,12 +17,11 @@ from ml_collections import config_dict
 import numpy as np
 import optax
 
+
 import io_processors
 import perceiver
 from train import dataset
 from train import utils
-
-logging.get_absl_handler().use_absl_log_file('logging','./' )
 
 FLAGS = flags.FLAGS
 
@@ -36,10 +35,10 @@ N_CLASSES = 600
 # To use the scaled-up hyperparameters, please adapt this script to your
 # training setup and set this flag to False
 IS_LOCAL = False#True
-NUM_FRAMES = 32
+NUM_FRAMES = 16
 # SAMPLES_PER_PATCH = 16
 NUM_CLASSES = 600
-IMG_SZ = 384//16
+IMG_SZ = 384 // 16 #56
 
 
 def get_training_steps(batch_size, n_epochs):
@@ -52,11 +51,11 @@ def get_config():
   config = base_config.get_base_config()
 
   # Experiment config.
-  local_batch_size = 20
+  local_batch_size = 2
   # Modify this to adapt to your custom distributed learning setup
   num_devices = 1
   config.train_batch_size = local_batch_size * num_devices
-  config.n_epochs = 1110
+  config.n_epochs = 110
 
   def _default_or_debug(default_value, debug_value):
     return debug_value if use_debug_settings else default_value
@@ -141,13 +140,24 @@ def get_config():
               data=dict(
                   num_classes=num_classes,
                   # Run on smaller inputs to debug.
-                  im_dim=_default_or_debug(384//16, 384//16),
-                  augmentation=dict(                     
+                  im_dim=_default_or_debug(24, 24),
+                  augmentation=dict(
+                      # Typical randaug params:
+                      # num_layers in [1, 3]
+                      # magnitude in [5, 30]
+                      # Set randaugment to None to disable.
+                      # randaugment=dict(
+                      #     num_layers=4,
+                      #     magnitude=5),
+                      # cutmix=True,
+                      # Mixup alpha should be in [0, 1].
+                      # Set to None to disable.
+                      # mixup_alpha=0.2,
                   ),
                   ),
               evaluation=dict(
                   subset='test',
-                  batch_size=20,
+                  batch_size=10,
               ),
           )
       )
@@ -157,12 +167,12 @@ def get_config():
   config.training_steps = get_training_steps(
       config.get_oneway_ref('train_batch_size'),
       config.get_oneway_ref('n_epochs'))
-  config.log_train_data_interval = 60
-  config.log_tensors_interval = 60
-  config.save_checkpoint_interval = 300
+  config.log_train_data_interval = 10
+  config.log_tensors_interval = 10
+  config.save_checkpoint_interval = 20
   config.eval_specific_checkpoint_dir = ''
   config.best_model_eval_metric = 'eval_top_1_acc'
-  config.checkpoint_dir = '/perceiver_autoencoder_checkpoints'
+  config.checkpoint_dir = '/perceiver_checkpoints'
   config.train_checkpoint_all_hosts = False
 
   # Prevents accidentally setting keys that aren't recognized (e.g. in tests).
@@ -172,7 +182,7 @@ def get_config():
 
 
 class Experiment(experiment.AbstractExperiment):
-  """kinetics experiment."""
+  """ImageNet experiment."""
 
   # A map from object properties that will be checkpointed to their name
   # in a checkpoint. Currently we assume that these are all sharded
@@ -224,10 +234,16 @@ class Experiment(experiment.AbstractExperiment):
         'image': subsampling['image'].shape[0],
         'label': 1,
     }
-        
-    perceiver_kwargs = self.config.model.perceiver_kwargs
     
-   
+      
+    
+    perceiver_kwargs = self.config.model.perceiver_kwargs
+    output_postprocessor = io_processors.MultimodalPostprocessor(  modalities={                            
+            'image': io_processors.ProjectionPostprocessor(
+                num_outputs=256),
+            'label': io_processors.ClassificationPostprocessor(
+                num_classes=NUM_CLASSES),
+        })
     input_preprocessor = io_processors.MultimodalPreprocessor(
         min_padding_size=4,        
         modalities={      
@@ -245,7 +261,7 @@ class Experiment(experiment.AbstractExperiment):
                 temporal_downsample=1),
             'label': io_processors.OneHotPreprocessor(),
         },
-        mask_probs={'image': 0.0,  'label': 1.0},
+        mask_probs={'image': 0.0, 'label': 1.0},
         )
     encoder = perceiver.PerceiverEncoder(**perceiver_kwargs['encoder'])
     decoder = perceiver.MultimodalDecoder(
@@ -281,12 +297,6 @@ class Experiment(experiment.AbstractExperiment):
             },
         **perceiver_kwargs['decoder'])
     
-    output_postprocessor = io_processors.MultimodalPostprocessor(  modalities={                            
-        'image': io_processors.ProjectionPostprocessor(
-            num_outputs=3),
-        'label': io_processors.ClassificationPostprocessor(
-            num_classes=NUM_CLASSES),
-        })
     model = perceiver.Perceiver(
       input_preprocessor=input_preprocessor,
       encoder=encoder,
@@ -345,7 +355,7 @@ class Experiment(experiment.AbstractExperiment):
       image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
       subsampling = {
             'image': jnp.arange(
-                image_chunk_size * 0 , image_chunk_size * (1)),
+                image_chunk_size * 0 , image_chunk_size * ( 1)),
             
             'label': None,
         }
@@ -401,7 +411,6 @@ class Experiment(experiment.AbstractExperiment):
       inputs: dataset.Batch,
       rng: jnp.ndarray,
   ) -> Tuple[jnp.ndarray, Tuple[Scalars, hk.State]]:
-    # that number i'm not sure about
     nchunks = 128
     reconstruction = {}
     
@@ -430,6 +439,12 @@ class Experiment(experiment.AbstractExperiment):
     reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs['images'].shape)
 
     label = self._one_hot(inputs['labels'])
+    # Handle cutmix/mixup label mixing:
+    # if 'mix_labels' in inputs:
+    #   logging.info('Using mixup or cutmix!')
+    #   mix_label = self._one_hot(inputs['mix_labels'])
+    #   mix_ratio = inputs['ratio'][:, None]
+    #   label = mix_ratio * label + (1. - mix_ratio) * mix_label
 
     # # Apply label-smoothing to one-hot labels.
     label_smoothing = self.config.training.label_smoothing
@@ -442,18 +457,11 @@ class Experiment(experiment.AbstractExperiment):
       label = smooth_positives * label + smooth_negatives
 
 
-######## NEW STUFF HERE ###################
-    loss_w_batch_class = utils.softmax_cross_entropy(reconstruction['label'], label)
-    loss_w_batch_images = utils.l1_loss(reconstruction['image'], inputs['images'])
-    
-    loss_images = jnp.mean(loss_w_batch_images, dtype=loss_w_batch_images.dtype)
-    loss_class = jnp.mean(loss_w_batch_class, dtype=loss_w_batch_class.dtype)
-    
-    loss = 0.03*loss_images + 1.0* loss_class
-    
+######## CHANGE!!!!!!!!!!!!!!! ###################
+    loss_w_batch = utils.softmax_cross_entropy(reconstruction['label'], label)
+    loss = jnp.mean(loss_w_batch, dtype=loss_w_batch.dtype)
     scaled_loss = loss / jax.device_count()
 
-## 
     metrics = utils.topk_correct(reconstruction['label'], inputs['labels'], prefix='')
     metrics = jax.tree_util.tree_map(jnp.mean, metrics)
 
@@ -546,11 +554,11 @@ class Experiment(experiment.AbstractExperiment):
         reconstruction['label'] = output['label']
         if 'image' not in reconstruction:
             reconstruction['image'] = output['image']
-            
+            # reconstruction['audio'] = output['audio']
         else:
             reconstruction['image'] = jnp.concatenate(
                 [reconstruction['image'], output['image']], axis=1)
-           
+            # reconstruction['audio'] = jnp.concatenate(
             
         
     reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs['images'].shape)
@@ -558,16 +566,11 @@ class Experiment(experiment.AbstractExperiment):
     
 
     
-    ### NEW ##############
+    ### CHANGE##############
 
     labels = self._one_hot(inputs['labels'])
-    loss_class = utils.softmax_cross_entropy(reconstruction['label'], labels)
-    loss_images = utils.l1_loss(reconstruction['image'], inputs['images'])
-    
-    loss = 0.03*loss_images + 1.0* loss_class
-    
-    
-    ## 
+    loss = utils.softmax_cross_entropy(reconstruction['label'], labels)
+
     metrics = utils.topk_correct(reconstruction['label'], inputs['labels'], prefix='')
     metrics = jax.tree_util.tree_map(jnp.mean, metrics)
     top_1_acc = metrics['top_1_acc']
