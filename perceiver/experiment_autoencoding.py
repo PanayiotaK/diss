@@ -17,12 +17,17 @@ from jaxline import utils as jl_utils
 from ml_collections import config_dict
 import numpy as np
 import optax
-
-
 import io_processors
 import perceiver
 from train import dataset
 from train import utils
+
+'''
+TO - DO:
+ * export checkpoints - look at : https://github.com/deepmind/deepmind-research/blob/master/adversarial_robustness/jax/experiment.py
+ * check z dims 
+ * pray(?) that everything is slightly correct? 
+'''
 
 logging.get_absl_handler().use_absl_log_file('logging','./' )
 
@@ -404,6 +409,7 @@ class Experiment(experiment.AbstractExperiment):
     reconstruction['label'] = output['label']
     
     # improve later - no need for the else part
+    
     if 'image' not in reconstruction:
         reconstruction['image'] = output['image']
         
