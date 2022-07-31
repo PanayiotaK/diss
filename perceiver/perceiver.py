@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""perceiver.Perceiver architecture and components."""
+"""Perceiver architecture and components."""
 
 import abc
 import math
@@ -333,12 +333,12 @@ class CrossAttention(hk.Module):
 
 
 #  -----------------------------------------------------------
-#  -----------------------  perceiver.Perceiver  -----------------------
+#  -----------------------  Perceiver  -----------------------
 #  -----------------------------------------------------------
 
 
 class Perceiver(hk.Module):
-  """The perceiver.Perceiver: a scalable, fully attentional architecture."""
+  """The Perceiver: a scalable, fully attentional architecture."""
 
   def __init__(
       self,
@@ -390,7 +390,7 @@ class Perceiver(hk.Module):
 
 
 class PerceiverEncoder(hk.Module):
-  """The perceiver.Perceiver Encoder: a scalable, fully attentional encoder."""
+  """The Perceiver Encoder: a scalable, fully attentional encoder."""
 
   def __init__(
       self,
@@ -473,7 +473,7 @@ class PerceiverEncoder(hk.Module):
 
 
 class AbstractPerceiverDecoder(hk.Module, metaclass=abc.ABCMeta):
-  """Abstract perceiver.Perceiver decoder."""
+  """Abstract Perceiver decoder."""
 
   @abc.abstractmethod
   def decoder_query(self, inputs, modality_sizes=None, inputs_without_pos=None,
