@@ -24,7 +24,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from perceiver import position_encoding
+import position_encoding
 
 
 ModalitySizeT = Mapping[str, int]
