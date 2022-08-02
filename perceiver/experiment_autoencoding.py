@@ -19,6 +19,8 @@ import numpy as np
 import optax
 import io_processors
 import perceiver
+import tensorflow as tf
+import os
 from train import dataset
 from train import utils
 
@@ -171,9 +173,9 @@ def get_config():
   config.log_train_data_interval = 10
   config.log_tensors_interval = 10
   config.save_checkpoint_interval = 20
-  config.eval_specific_checkpoint_dir = ''
+  config.eval_specific_checkpoint_dir = './'
   config.best_model_eval_metric = 'eval_top_1_acc'
-  config.checkpoint_dir = ''
+  config.checkpoint_dir = './'
   config.train_checkpoint_all_hosts = False
 
   # Prevents accidentally setting keys that aren't recognized (e.g. in tests).
@@ -201,6 +203,7 @@ class Experiment(experiment.AbstractExperiment):
 
     self.mode = mode
     self.init_rng = init_rng
+    logging.info('rng %d', init_rng)
     self.config = config
 
     # Checkpointed experiment state.
@@ -234,6 +237,7 @@ class Experiment(experiment.AbstractExperiment):
     perceiver_kwargs = self.config.model.perceiver_kwargs
 
     input_preprocessor = io_processors.MultimodalPreprocessor(
+        #check if you even need that
         min_padding_size=4,        
         modalities={      
             'image': io_processors.LatentVideoPreprocessor(
@@ -298,6 +302,7 @@ class Experiment(experiment.AbstractExperiment):
     return model({'image': inputs,                
                 'label': np.zeros((inputs.shape[0], 600))},
                is_training=is_training)
+    
     #, subsampled_output_points=subsampling)
 
   #  _             _
@@ -322,6 +327,27 @@ class Experiment(experiment.AbstractExperiment):
             ))
 
     scalars = jl_utils.get_first(scalars)
+    
+    # Save final checkpoint.
+    
+    global_step_value = jl_utils.get_first(global_step)
+    # logging.info('training_steps %d', FLAGS.config.get('training_steps', 1) )
+    
+    if (global_step_value  % FLAGS.config.save_checkpoint_interval  == 0) or ( global_step_value == FLAGS.config.get('training_steps', 1) - 1 ):
+    
+      if global_step_value  % FLAGS.config.save_checkpoint_interval == 0 :
+        name = 'checkpoing_' + str(global_step_value) +  '.npy'
+      if global_step_value == FLAGS.config.get('training_steps', 1) - 1  :
+        name = 'final_checkpoint.npy'
+          
+      f_np = lambda x: np.array(jax.device_get(jl_utils.get_first(x)))
+      np_params = jax.tree_map(f_np, self._params)
+      np_state = jax.tree_map(f_np, self._state)
+      path_npy = os.path.join(FLAGS.config.checkpoint_dir, name)
+      with tf.io.gfile.GFile(path_npy, 'wb') as fp:
+        np.save(fp, (np_params, np_state))
+      logging.info('Saved final checkpoint at %s', path_npy)
+          
     return scalars
 
   def _initialize_train(self):
@@ -400,8 +426,7 @@ class Experiment(experiment.AbstractExperiment):
       rng: jnp.ndarray,
   ) -> Tuple[jnp.ndarray, Tuple[Scalars, hk.State]]:
     # nchunks = 128
-    reconstruction = {}
-    
+    reconstruction = {}    
         
     output, state = self.forward.apply(
         params, state, rng, inputs,  is_training=True)  #subsampling=subsampling,
@@ -452,6 +477,7 @@ class Experiment(experiment.AbstractExperiment):
 
     loss_scalars = dict(
         loss=loss,
+        l1_loss = loss_images,
         top_1_acc=top_1_acc,
         top_5_acc=top_5_acc,
     )
