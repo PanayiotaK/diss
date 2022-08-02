@@ -26,6 +26,8 @@ from train import dataset
 from train import utils
 from vqgan_jax.modeling_flax_vqgan import VQModel
 
+jax.tools.colab_tpu.setup_tpu()
+
 logging.get_absl_handler().use_absl_log_file('logging','./' )
 
 FLAGS = flags.FLAGS
@@ -55,7 +57,6 @@ vqgan_model = VQModel.from_pretrained(
     VQGAN_REPO, revision=VQGAN_COMMIT_ID
 )
 
-jax.tools.colab_tpu.setup_tpu()
 
 
 def get_training_steps(batch_size, n_epochs):
@@ -65,7 +66,7 @@ def dencode(vqgan_model, batch_indices):
   reshape = jnp.squeeze(batch_indices)
   reshape_rearrange =jnp.asarray( einops.rearrange(reshape, 'b h w -> b (h w)'))
   logging.info('shape decoder vqgan %s', reshape_rearrange.shape)
-  images_rec = vqgan_model.decode_code(batch_indices)
+  images_rec = vqgan_model.decode_code(reshape_rearrange)
   return images_rec
 
 def get_config():
@@ -74,7 +75,7 @@ def get_config():
   config = base_config.get_base_config()
 
   # Experiment config.
-  local_batch_size = 2 # 8
+  local_batch_size =  8 #2
   # Modify this to adapt to your custom distributed learning setup
   num_devices = 1
   config.train_batch_size = local_batch_size * num_devices
@@ -170,7 +171,7 @@ def get_config():
                   ),
               evaluation=dict(
                   subset='test',
-                  batch_size= 2 #8,
+                  batch_size= 8, #2
               ),
           )
       )
@@ -473,9 +474,9 @@ class Experiment(experiment.AbstractExperiment):
     print("shape: ", jnp.asarray(reconstruction['image']) )
     print("type label: ", type (reconstruction['label']))
     # decode_batch = jax.jit(self.decode_all_batches)
-    all_pixel_images = self.decode_batch(reconstruction['image'])
-       
-    logging.info('shape: %s',  all_pixel_images.shape)
+    all_pixel_images_recon = self.decode_batch(reconstruction['image'])
+    pixel_images_input = self.decode_batch(inputs['images'])
+    logging.info('shape: %s',  all_pixel_images_recon.shape)
     
     
     label = self._one_hot(inputs['labels'])
@@ -493,7 +494,7 @@ class Experiment(experiment.AbstractExperiment):
 
 ######## New stuff here ###################
     loss_w_batch_class = utils.softmax_cross_entropy(reconstruction['label'], label)
-    loss_w_batch_images = utils.l1_loss(reconstruction['image'], inputs['images'])
+    loss_w_batch_images = utils.l1_loss(all_pixel_images_recon, pixel_images_input)
     
     loss_images = jnp.mean(loss_w_batch_images, dtype=loss_w_batch_images.dtype)
     loss_class = jnp.mean(loss_w_batch_class, dtype=loss_w_batch_class.dtype)
