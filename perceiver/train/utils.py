@@ -49,9 +49,8 @@ def l1_loss(
     # Avoid broadcasting logic for "-" operator.
     chex.assert_equal_shape((predictions, targets))
   errors = (predictions - targets) if (targets is not None) else predictions
-  print(jnp.asarray(0.5 * abs(errors)))
-  return jnp.asarray(jnp.sum(0.5 * abs(errors), axis= -1))
-
+  # print(jnp.asarray(0.5 * jnp.absolute(errors)))
+  return jnp.asarray(jnp.mean(jnp.absolute(errors)))
 
 def topk_correct(logits, labels, mask=None, prefix='', topk=(1, 5)):
   """Calculate top-k error for multiple k values."""
