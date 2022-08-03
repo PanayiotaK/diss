@@ -63,10 +63,9 @@ def get_training_steps(batch_size, n_epochs):
   return (N_TRAIN_EXAMPLES * n_epochs) // batch_size
 
 def dencode(vqgan_model, batch_indices):
-  reshape = jnp.squeeze(batch_indices)
-  reshape_rearrange =jnp.asarray( einops.rearrange(reshape, 'b h w -> b (h w)'))
-  logging.info('shape decoder vqgan %s', reshape_rearrange.shape)
-  images_rec = vqgan_model.decode_code(reshape_rearrange)
+  print("batched indices in decoder: ", batch_indices.shape) 
+  # logging.info('shape decoder vqgan %s', reshape_rearrange.shape)
+  images_rec = vqgan_model.decode_code(batch_indices)
   return images_rec
 
 def get_config():
@@ -77,7 +76,7 @@ def get_config():
   # Experiment config.
   local_batch_size =  8 #2
   # Modify this to adapt to your custom distributed learning setup
-  num_devices = 1
+  num_devices = jax.device_count()
   config.train_batch_size = local_batch_size * num_devices
   config.n_epochs = 110
 
@@ -235,6 +234,8 @@ class Experiment(experiment.AbstractExperiment):
     self._update_func = jax.pmap(self._update_func, axis_name='i',
                                  donate_argnums=(0, 1, 2))
     self._eval_batch = jax.jit(self._eval_batch)
+    self.p_decoder = jax.pmap(lambda batch: dencode(vqgan_model, batch))
+
     self.decode_batch = jax.jit(self.decode_all_batches)
   def _forward_fn(
       self,
@@ -432,12 +433,19 @@ class Experiment(experiment.AbstractExperiment):
   def decode_all_batches(self,bached_videos):
     i = 0 
     jtensor = jnp.array(bached_videos)  
-    for video in jtensor:     
+    print("bached videos decoder_all: ", jtensor.shape )
+
+    for video in jtensor:   
+      reshape = jnp.squeeze(video)
+      reshape_rearrange = jnp.asarray( einops.rearrange(reshape, 'b h w -> b (h w)'))  
+      expanded = jnp.expand_dims(reshape_rearrange, axis=0)
+      logging.info('shape squeeze/mult %s', expanded.shape)
       if i == 0 :
-        new_t = [dencode(vqgan_model, video)]
+        print("p_decoder input shape: ", expanded.shape)
+        new_t = [self.p_decoder(expanded)]
         # print("init here: ",len(new_t))
       else:
-        new_t.append(dencode(vqgan_model, video))
+        new_t.append(self.p_decoder(expanded))
       i += 1
     final = jnp.stack(new_t)
     return final
@@ -476,7 +484,8 @@ class Experiment(experiment.AbstractExperiment):
     # decode_batch = jax.jit(self.decode_all_batches)
     all_pixel_images_recon = self.decode_batch(reconstruction['image'])
     pixel_images_input = self.decode_batch(inputs['images'])
-    logging.info('shape: %s',  all_pixel_images_recon.shape)
+    logging.info('pixel shape recon: %s',  all_pixel_images_recon.shape)
+    logging.info('input shape pixel: %s',  pixel_images_input.shape)
     
     
     label = self._one_hot(inputs['labels'])
