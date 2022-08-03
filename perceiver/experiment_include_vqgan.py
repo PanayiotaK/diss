@@ -448,7 +448,8 @@ class Experiment(experiment.AbstractExperiment):
         new_t.append(self.p_decoder(expanded))
       i += 1
     final = jnp.stack(new_t)
-    return final
+    sq_final = jnp.squeeze(final)
+    return sq_final
 
   def _loss_fn(
       self,
