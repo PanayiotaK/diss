@@ -125,9 +125,11 @@ def dataset_numpy(filenames_list):
         ds = tf.data.Dataset.from_tensor_slices({'images':video, 'labels' : class_init})   
                 
         for file in filenames_list[1:]: 
-            data = jax.nn.one_hot(np.load(file), 256)
-            data = jnp.squeeze(data)
-            video =  np.expand_dims(data['arr_0'], axis=0)
+            data = np.load(file)
+            
+            vid = jax.nn.one_hot(data['arr_0'], 256 )
+            vid =  jnp.squeeze(vid)
+            video =  np.expand_dims(vid,axis=0)
             class_no = np.expand_dims(data['arr_1'], axis=0)
             add_ds = tf.data.Dataset.from_tensor_slices({'images':video, 'labels' : class_no})
             ds = ds.concatenate(add_ds)
