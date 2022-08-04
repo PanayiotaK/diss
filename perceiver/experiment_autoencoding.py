@@ -8,6 +8,7 @@ from absl import flags
 from absl import logging
 import haiku as hk
 import jax
+import einops
 import jax.tools.colab_tpu
 import jax.numpy as jnp
 from jaxline import base_config
@@ -23,13 +24,7 @@ import tensorflow as tf
 import os
 from train import dataset
 from train import utils
-
-'''
-TO - DO:
- * export checkpoints - look at : https://github.com/deepmind/deepmind-research/blob/master/adversarial_robustness/jax/experiment.py
- * check z dims 
- * pray(?) that everything is slightly correct? 
-'''
+# from vqgan_jax.modeling_flax_vqgan import VQModel
 
 logging.get_absl_handler().use_absl_log_file('logging','./' )
 
@@ -51,12 +46,27 @@ NUM_CLASSES = 600
 IMG_SZ = 24 # 24  #56
 
 
+# DALLE_MODEL = "dalle-mini/dalle-mini/mega-1-fp16:latest"  # can be wandb artifact or 🤗 Hub or local folder or google bucket
+# DALLE_COMMIT_ID = None
+# VQGAN_REPO = "dalle-mini/vqgan_imagenet_f16_16384"
+# VQGAN_COMMIT_ID = "e93a26e7707683d349bf5d5c41c5b0ef69b677a9"
+
+# vqgan_model = VQModel.from_pretrained(
+#     VQGAN_REPO, revision=VQGAN_COMMIT_ID
+# )
+
 jax.tools.colab_tpu.setup_tpu()
 
 
 def get_training_steps(batch_size, n_epochs):
   return (N_TRAIN_EXAMPLES * n_epochs) // batch_size
 
+def dencode(vqgan_model, batch_indices):
+  reshape = jnp.squeeze(batch_indices)
+  reshape_rearrange =jnp.asarray( einops.rearrange(reshape, 'b h w -> b (h w)'))
+  logging.info('shape decoder vqgan %s', reshape_rearrange.shape)
+  images_rec = vqgan_model.decode_code(reshape_rearrange)
+  return images_rec
 
 def get_config():
   """Return config object for training."""
@@ -64,7 +74,7 @@ def get_config():
   config = base_config.get_base_config()
 
   # Experiment config.
-  local_batch_size = 8
+  local_batch_size = 2 # 8
   # Modify this to adapt to your custom distributed learning setup
   num_devices = 1
   config.train_batch_size = local_batch_size * num_devices
@@ -160,7 +170,7 @@ def get_config():
                   ),
               evaluation=dict(
                   subset='test',
-                  batch_size=8,
+                  batch_size= 2 #8,
               ),
           )
       )
@@ -203,7 +213,7 @@ class Experiment(experiment.AbstractExperiment):
 
     self.mode = mode
     self.init_rng = init_rng
-    logging.info('rng %d', init_rng)
+    # logging.info('rng %d', init_rng)
     self.config = config
 
     # Checkpointed experiment state.
@@ -224,7 +234,7 @@ class Experiment(experiment.AbstractExperiment):
     self._update_func = jax.pmap(self._update_func, axis_name='i',
                                  donate_argnums=(0, 1, 2))
     self._eval_batch = jax.jit(self._eval_batch)
-
+    self.decode_batch = jax.jit(self.decode_all_batches)
   def _forward_fn(
       self,
       inputs: dataset.Batch,
@@ -289,7 +299,7 @@ class Experiment(experiment.AbstractExperiment):
     
     output_postprocessor = io_processors.MultimodalPostprocessor(  modalities={                            
         'image': io_processors.ProjectionPostprocessor(
-            num_outputs=1),
+            num_outputs=256),
         'label': io_processors.ClassificationPostprocessor(
             num_classes=NUM_CLASSES),
     })
@@ -417,6 +427,19 @@ class Experiment(experiment.AbstractExperiment):
     """One-hot encoding potentially over a sequence of labels."""
     y = jax.nn.one_hot(value, self.config.data.num_classes)
     return y
+  
+  def decode_all_batches(self,bached_videos):
+    i = 0 
+    jtensor = jnp.array(bached_videos)  
+    for video in jtensor:     
+      if i == 0 :
+        new_t = [dencode(vqgan_model, video)]
+        # print("init here: ",len(new_t))
+      else:
+        new_t.append(dencode(vqgan_model, video))
+      i += 1
+    final = jnp.stack(new_t)
+    return final
 
   def _loss_fn(
       self,
@@ -444,7 +467,17 @@ class Experiment(experiment.AbstractExperiment):
           
             
     reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs['images'].shape)
-
+    
+    print("type reconstruction[image]: ", type(reconstruction['image']))
+    # logging.info("type reconstruction[image]: %s",  type(reconstruction['image']))
+    print("shape: ", jnp.asarray(reconstruction['image']) )
+    print("type label: ", type (reconstruction['label']))
+    # decode_batch = jax.jit(self.decode_all_batches)
+    all_pixel_images = self.decode_batch(reconstruction['image'])
+       
+    logging.info('shape: %s',  all_pixel_images.shape)
+    
+    
     label = self._one_hot(inputs['labels'])
     
     # # Apply label-smoothing to one-hot labels.
@@ -460,9 +493,12 @@ class Experiment(experiment.AbstractExperiment):
 
 ######## New stuff here ###################
     loss_w_batch_class = utils.softmax_cross_entropy(reconstruction['label'], label)
+    print('recon[label] %s',  reconstruction['label'])
+    logging.info('recon[label] %s', reconstruction['label'].shape)
     loss_w_batch_images = utils.l1_loss(reconstruction['image'], inputs['images'])
     
-    loss_images = jnp.mean(loss_w_batch_images, dtype=loss_w_batch_images.dtype)
+    
+    loss_images = loss_w_batch_images
     loss_class = jnp.mean(loss_w_batch_class, dtype=loss_w_batch_class.dtype)
     
     loss = 0.03*loss_images + 1.0* loss_class
