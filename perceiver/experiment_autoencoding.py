@@ -55,18 +55,18 @@ IMG_SZ = 24 # 24  #56
 #     VQGAN_REPO, revision=VQGAN_COMMIT_ID
 # )
 
-jax.tools.colab_tpu.setup_tpu()
+# jax.tools.colab_tpu.setup_tpu()
 
 
 def get_training_steps(batch_size, n_epochs):
   return (N_TRAIN_EXAMPLES * n_epochs) // batch_size
 
-def dencode(vqgan_model, batch_indices):
-  reshape = jnp.squeeze(batch_indices)
-  reshape_rearrange =jnp.asarray( einops.rearrange(reshape, 'b h w -> b (h w)'))
-  logging.info('shape decoder vqgan %s', reshape_rearrange.shape)
-  images_rec = vqgan_model.decode_code(reshape_rearrange)
-  return images_rec
+# def dencode(vqgan_model, batch_indices):
+  # reshape = jnp.squeeze(batch_indices)
+  # reshape_rearrange =jnp.asarray( einops.rearrange(reshape, 'b h w -> b (h w)'))
+  # logging.info('shape decoder vqgan %s', reshape_rearrange.shape)
+  # images_rec = vqgan_model.decode_code(reshape_rearrange)
+  # return images_rec
 
 def get_config():
   """Return config object for training."""
@@ -234,16 +234,21 @@ class Experiment(experiment.AbstractExperiment):
     self._update_func = jax.pmap(self._update_func, axis_name='i',
                                  donate_argnums=(0, 1, 2))
     self._eval_batch = jax.jit(self._eval_batch)
-    self.decode_batch = jax.jit(self.decode_all_batches)
+    # self.decode_batch = jax.jit(self.decode_all_batches)
   def _forward_fn(
       self,
       inputs: dataset.Batch,
       is_training: bool,
-    #   subsampling
+      subsampling
   ) -> jnp.ndarray:
 
     inputs = inputs['images']
-           
+    
+    subsampled_index_dims = {      
+        'image': subsampling['image'].shape[0],
+        'label': 1,
+    }
+    
     perceiver_kwargs = self.config.model.perceiver_kwargs
 
     input_preprocessor = io_processors.MultimodalPreprocessor(
@@ -311,9 +316,7 @@ class Experiment(experiment.AbstractExperiment):
 
     return model({'image': inputs,                
                 'label': np.zeros((inputs.shape[0], 600))},
-               is_training=is_training)
-    
-    #, subsampled_output_points=subsampling)
+               is_training=is_training, subsampled_output_points=subsampling)
 
   #  _             _
   # | |_ _ __ __ _(_)_ __
@@ -380,9 +383,17 @@ class Experiment(experiment.AbstractExperiment):
       logging.info('Initializing parameters.')
 
       inputs = next(self._train_input)
-     
+      
+      nchunks = 128
+      image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
+      subsampling = {
+            'image': jnp.arange(
+                image_chunk_size * 0 , image_chunk_size * ( 1)),
+            
+            'label': None,
+        }
     
-      init_net = jax.pmap(lambda *a: self.forward.init(*a, is_training=True)) # subsampling=subsampling, ))
+      init_net = jax.pmap(lambda *a: self.forward.init(*a, subsampling=subsampling,is_training=True)) # subsampling=subsampling, ))
       init_opt = jax.pmap(self._optimizer.init)
 
       # Init uses the same RNG key on all hosts+devices to ensure everyone
@@ -428,18 +439,18 @@ class Experiment(experiment.AbstractExperiment):
     y = jax.nn.one_hot(value, self.config.data.num_classes)
     return y
   
-  def decode_all_batches(self,bached_videos):
-    i = 0 
-    jtensor = jnp.array(bached_videos)  
-    for video in jtensor:     
-      if i == 0 :
-        new_t = [dencode(vqgan_model, video)]
-        # print("init here: ",len(new_t))
-      else:
-        new_t.append(dencode(vqgan_model, video))
-      i += 1
-    final = jnp.stack(new_t)
-    return final
+  # def decode_all_batches(self,bached_videos):
+  #   i = 0 
+  #   jtensor = jnp.array(bached_videos)  
+  #   for video in jtensor:     
+  #     if i == 0 :
+  #       new_t = [dencode(vqgan_model, video)]
+  #       # print("init here: ",len(new_t))
+  #     else:
+  #       new_t.append(dencode(vqgan_model, video))
+  #     i += 1
+  #   final = jnp.stack(new_t)
+  #   return final
 
   def _loss_fn(
       self,
@@ -448,31 +459,38 @@ class Experiment(experiment.AbstractExperiment):
       inputs: dataset.Batch,
       rng: jnp.ndarray,
   ) -> Tuple[jnp.ndarray, Tuple[Scalars, hk.State]]:
-    # nchunks = 128
-    reconstruction = {}    
-        
-    output, state = self.forward.apply(
-        params, state, rng, inputs,  is_training=True)  #subsampling=subsampling,
 
-    reconstruction['label'] = output['label']
-    
-    # improve later - no need for the else part
-    
-    if 'image' not in reconstruction:
-        reconstruction['image'] = output['image']
+    nchunks = 128
+    reconstruction = {}    
+    for chunk_idx in range(nchunks):
+        image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
         
-    else:
-        reconstruction['image'] = jnp.concatenate(
-            [reconstruction['image'], output['image']], axis=1)
-          
+        subsampling = {
+            'image': jnp.arange(
+                image_chunk_size * chunk_idx, image_chunk_size * (chunk_idx + 1)),
+           
+            'label': None,
+        }
+        
+        output, state = self.forward.apply(
+            params, state, rng, inputs, subsampling=subsampling, is_training=True)
+    
+        reconstruction['label'] = output['label']
+        if 'image' not in reconstruction:
+            reconstruction['image'] = output['image']
             
+        else:
+            reconstruction['image'] = jnp.concatenate(
+                [reconstruction['image'], output['image']], axis=1)
+          
+   
     reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs['images'].shape)
     
     print("type reconstruction[image]: ", type(reconstruction['image']))
     # logging.info("type reconstruction[image]: %s",  type(reconstruction['image']))
     print("shape: ", jnp.asarray(reconstruction['image']) )
     print("type label: ", type (reconstruction['label']))
-    # decode_batch = jax.jit(self.decode_all_batches)
+   
     all_pixel_images = self.decode_batch(reconstruction['image'])
        
     logging.info('shape: %s',  all_pixel_images.shape)
@@ -495,7 +513,9 @@ class Experiment(experiment.AbstractExperiment):
     loss_w_batch_class = utils.softmax_cross_entropy(reconstruction['label'], label)
     print('recon[label] %s',  reconstruction['label'])
     logging.info('recon[label] %s', reconstruction['label'].shape)
-    loss_w_batch_images = utils.l1_loss(reconstruction['image'], inputs['images'])
+    
+    loss_w_batch_images =  utils.softmax_cross_entropy(reconstruction['image'], inputs['images'])
+    #utils.l1_loss(reconstruction['image'], inputs['images'])
     
     
     loss_images = loss_w_batch_images
@@ -584,16 +604,25 @@ class Experiment(experiment.AbstractExperiment):
     """Evaluates a batch."""
     nchunks = 128
     reconstruction = {}
-   
-    output, _ = self.forward.apply(
-        params, state, rng, inputs, is_training=False) #  subsampling,
-    reconstruction['label'] = output['label']
-    if 'image' not in reconstruction:
-        reconstruction['image'] = output['image']
-        # reconstruction['audio'] = output['audio']
-    else:
-        reconstruction['image'] = jnp.concatenate(
-            [reconstruction['image'], output['image']], axis=1)            
+    for chunk_idx in range(nchunks):
+        image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
+        
+        subsampling = {
+            'image': jnp.arange(
+                image_chunk_size * chunk_idx, image_chunk_size * (chunk_idx + 1)),
+            
+            'label': None,
+        }
+        output, _ = self.forward.apply(
+            params, state, rng, inputs, subsampling, is_training=False)
+        reconstruction['label'] = output['label']
+        if 'image' not in reconstruction:
+            reconstruction['image'] = output['image']
+            
+        else:
+            reconstruction['image'] = jnp.concatenate(
+                [reconstruction['image'], output['image']], axis=1)
+           
                  
     reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs['images'].shape)
     
@@ -604,7 +633,8 @@ class Experiment(experiment.AbstractExperiment):
 
     labels = self._one_hot(inputs['labels'])
     loss_class = utils.softmax_cross_entropy(reconstruction['label'], labels)
-    loss_images = utils.l1_loss(reconstruction['image'], inputs['images'])
+    loss_images = utils.softmax_cross_entropy(reconstruction['image'], inputs['images'])
+    #utils.l1_loss(reconstruction['image'], inputs['images'])
     
     loss = 0.03*loss_images + 1.0* loss_class
 
