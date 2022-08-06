@@ -517,7 +517,7 @@ class Experiment(experiment.AbstractExperiment):
 ######## New stuff here ###################
     loss_w_batch_class = utils.softmax_cross_entropy(reconstruction['label'], label)
     print('recon[label] %s',  reconstruction['label'])
-    logging.info('recon[label] %s', reconstruction['label'].shape)
+    logging.info('recon[label] shape %s', reconstruction['label'].shape)
     
     loss_w_batch_images =  utils.l1_loss(reconstruction['image'], inputs['images'])
     #utils.l1_loss(reconstruction['image'], inputs['images'])
