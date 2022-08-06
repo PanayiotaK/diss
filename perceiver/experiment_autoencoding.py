@@ -43,7 +43,7 @@ IS_LOCAL = False#True
 NUM_FRAMES = 16
 # SAMPLES_PER_PATCH = 16
 NUM_CLASSES = 600
-IMG_SZ = 24 # 24  #56
+IMG_SZ = 6 #24 # 24  #56
 
 
 # DALLE_MODEL = "dalle-mini/dalle-mini/mega-1-fp16:latest"  # can be wandb artifact or 🤗 Hub or local folder or google bucket
@@ -76,7 +76,7 @@ def get_config():
   # Experiment config.
   local_batch_size = 2 # 8
   # Modify this to adapt to your custom distributed learning setup
-  num_devices = 1
+  num_devices = jax.device_count()#1
   config.train_batch_size = local_batch_size * num_devices
   config.n_epochs = 110
 
@@ -255,7 +255,7 @@ class Experiment(experiment.AbstractExperiment):
         #check if you even need that
         min_padding_size=4,        
         modalities={      
-            'image': io_processors.LatentVideoPreprocessor(
+            'image': io_processors.ImagePreprocessor(
                 position_encoding_type= 'fourier',
                 fourier_position_encoding_kwargs=dict(
                     num_bands=32,
@@ -263,7 +263,10 @@ class Experiment(experiment.AbstractExperiment):
                     sine_only=False,
                     concat_pos=True,
                 ),
-                n_extra_pos_mlp=0,                
+                n_extra_pos_mlp=0,  
+                prep_type='patches',
+                spatial_downsample=4,
+                temporal_downsample=1              
                 ),
             'label': io_processors.OneHotPreprocessor(),
         },
@@ -271,10 +274,11 @@ class Experiment(experiment.AbstractExperiment):
         )
     encoder = perceiver.PerceiverEncoder(**perceiver_kwargs['encoder'])
     decoder = perceiver.MultimodalDecoder(
-        # subsampled_index_dims=subsampled_index_dims,
+        subsampled_index_dims=subsampled_index_dims,
         modalities={
                 'image': perceiver.BasicVideoAutoencodingDecoder(
-                    concat_preprocessed_input=False,                    
+                    concat_preprocessed_input=False,  
+                    subsampled_index_dims=subsampling['image'],                  
                     output_shape=inputs.shape[:4],
                     num_z_channels=1024,
                     output_num_channels=512,
@@ -385,6 +389,7 @@ class Experiment(experiment.AbstractExperiment):
       inputs = next(self._train_input)
       
       nchunks = 128
+      
       image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
       subsampling = {
             'image': jnp.arange(
