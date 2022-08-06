@@ -491,14 +491,14 @@ class Experiment(experiment.AbstractExperiment):
    
     reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs['images'].shape)
     
-    print("type reconstruction[image]: ", type(reconstruction['image']))
-    # logging.info("type reconstruction[image]: %s",  type(reconstruction['image']))
-    print("shape: ", jnp.asarray(reconstruction['image']) )
+    print("shape reconstruction[image]: ", reconstruction['image'].shape)
+    logging.info("type reconstruction[image]: %s",   reconstruction['image'].shape)
+    # print("shape: ", jnp.asarray(reconstruction['image']) )
     print("type label: ", type (reconstruction['label']))
    
-    all_pixel_images = self.decode_batch(reconstruction['image'])
+    # all_pixel_images = self.decode_batch(reconstruction['image'])
        
-    logging.info('shape: %s',  all_pixel_images.shape)
+    # logging.info('shape: %s',  all_pixel_images.shape)
     
     
     label = self._one_hot(inputs['labels'])
@@ -519,12 +519,14 @@ class Experiment(experiment.AbstractExperiment):
     print('recon[label] %s',  reconstruction['label'])
     logging.info('recon[label] %s', reconstruction['label'].shape)
     
-    loss_w_batch_images =  utils.softmax_cross_entropy(reconstruction['image'], inputs['images'])
+    loss_w_batch_images =  utils.l1_loss(reconstruction['image'], inputs['images'])
     #utils.l1_loss(reconstruction['image'], inputs['images'])
-    
+    logging.info('l1 loss shape: %s', loss_w_batch_images.shape)
     
     loss_images = loss_w_batch_images
     loss_class = jnp.mean(loss_w_batch_class, dtype=loss_w_batch_class.dtype)
+    
+    logging.info('class shape: %s', loss_class.shape)
     
     loss = 0.03*loss_images + 1.0* loss_class
     
@@ -632,13 +634,11 @@ class Experiment(experiment.AbstractExperiment):
     reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs['images'].shape)
     
     
-
-    
     ### New stuff here ##############
 
     labels = self._one_hot(inputs['labels'])
     loss_class = utils.softmax_cross_entropy(reconstruction['label'], labels)
-    loss_images = utils.softmax_cross_entropy(reconstruction['image'], inputs['images'])
+    loss_images = utils.l1_loss(reconstruction['image'], inputs['images'])
     #utils.l1_loss(reconstruction['image'], inputs['images'])
     
     loss = 0.03*loss_images + 1.0* loss_class
