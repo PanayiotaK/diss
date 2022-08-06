@@ -126,7 +126,6 @@ def dataset_numpy(filenames_list):
                 
         for file in filenames_list[1:]: 
             data = np.load(file)
-            
             # vid = jax.nn.one_hot(data['arr_0'], 256 )
             # vid =  jnp.squeeze(vid)
             video =  np.expand_dims(data['arr_0'],axis=0)
