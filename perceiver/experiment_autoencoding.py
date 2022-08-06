@@ -43,7 +43,7 @@ IS_LOCAL = False#True
 NUM_FRAMES = 16
 # SAMPLES_PER_PATCH = 16
 NUM_CLASSES = 600
-IMG_SZ = 6 #24 # 24  #56
+IMG_SZ = 6 #24  #56
 
 
 # DALLE_MODEL = "dalle-mini/dalle-mini/mega-1-fp16:latest"  # can be wandb artifact or 🤗 Hub or local folder or google bucket
@@ -163,7 +163,7 @@ def get_config():
               data=dict(
                   num_classes=num_classes,
                   # Run on smaller inputs to debug.
-                  im_dim = _default_or_debug(24, 24),
+                  im_dim = _default_or_debug(IMG_SZ,IMG_SZ),
                   augmentation=dict(
                      
                   ),
