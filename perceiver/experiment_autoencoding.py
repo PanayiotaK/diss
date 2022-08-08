@@ -8,7 +8,6 @@ from absl import flags
 from absl import logging
 import haiku as hk
 import jax
-import einops
 import jax.tools.colab_tpu
 import jax.numpy as jnp
 from jaxline import base_config
@@ -24,7 +23,7 @@ import tensorflow as tf
 import os
 from train import dataset
 from train import utils
-# from vqgan_jax.modeling_flax_vqgan import VQModel
+
 
 logging.get_absl_handler().use_absl_log_file('logging','./' )
 
@@ -39,34 +38,19 @@ N_CLASSES = 600
 # Only local/debug parameters are supported out of the box.
 # To use the scaled-up hyperparameters, please adapt this script to your
 # training setup and set this flag to False
-IS_LOCAL = False#True
+IS_LOCAL = True
 NUM_FRAMES = 16
 # SAMPLES_PER_PATCH = 16
 NUM_CLASSES = 600
-IMG_SZ = 6 #24  #56
+IMG_SZ = 6 #24 # 24  #56
 
 
-# DALLE_MODEL = "dalle-mini/dalle-mini/mega-1-fp16:latest"  # can be wandb artifact or 🤗 Hub or local folder or google bucket
-# DALLE_COMMIT_ID = None
-# VQGAN_REPO = "dalle-mini/vqgan_imagenet_f16_16384"
-# VQGAN_COMMIT_ID = "e93a26e7707683d349bf5d5c41c5b0ef69b677a9"
-
-# vqgan_model = VQModel.from_pretrained(
-#     VQGAN_REPO, revision=VQGAN_COMMIT_ID
-# )
-
-# jax.tools.colab_tpu.setup_tpu()
+jax.tools.colab_tpu.setup_tpu()
 
 
 def get_training_steps(batch_size, n_epochs):
   return (N_TRAIN_EXAMPLES * n_epochs) // batch_size
 
-# def dencode(vqgan_model, batch_indices):
-  # reshape = jnp.squeeze(batch_indices)
-  # reshape_rearrange =jnp.asarray( einops.rearrange(reshape, 'b h w -> b (h w)'))
-  # logging.info('shape decoder vqgan %s', reshape_rearrange.shape)
-  # images_rec = vqgan_model.decode_code(reshape_rearrange)
-  # return images_rec
 
 def get_config():
   """Return config object for training."""
@@ -74,9 +58,9 @@ def get_config():
   config = base_config.get_base_config()
 
   # Experiment config.
-  local_batch_size = 2 # 8
+  local_batch_size = 4
   # Modify this to adapt to your custom distributed learning setup
-  num_devices = jax.device_count()#1
+  num_devices = jax.device_count()
   config.train_batch_size = local_batch_size * num_devices
   config.n_epochs = 110
 
@@ -163,14 +147,14 @@ def get_config():
               data=dict(
                   num_classes=num_classes,
                   # Run on smaller inputs to debug.
-                  im_dim = _default_or_debug(IMG_SZ,IMG_SZ),
+                  im_dim = _default_or_debug(24, 24),
                   augmentation=dict(
                      
                   ),
                   ),
               evaluation=dict(
                   subset='test',
-                  batch_size= 2 #8,
+                  batch_size=8,
               ),
           )
       )
@@ -234,7 +218,7 @@ class Experiment(experiment.AbstractExperiment):
     self._update_func = jax.pmap(self._update_func, axis_name='i',
                                  donate_argnums=(0, 1, 2))
     self._eval_batch = jax.jit(self._eval_batch)
-    # self.decode_batch = jax.jit(self.decode_all_batches)
+
   def _forward_fn(
       self,
       inputs: dataset.Batch,
@@ -243,42 +227,44 @@ class Experiment(experiment.AbstractExperiment):
   ) -> jnp.ndarray:
 
     inputs = inputs['images']
-    
-    subsampled_index_dims = {      
-        'image': subsampling['image'].shape[0],
-        'label': 1,
-    }
-    
+           
     perceiver_kwargs = self.config.model.perceiver_kwargs
 
     input_preprocessor = io_processors.MultimodalPreprocessor(
         #check if you even need that
         min_padding_size=4,        
-        modalities={      
+        modalities={    
+              
             'image': io_processors.ImagePreprocessor(
-                position_encoding_type= 'fourier',
-                fourier_position_encoding_kwargs=dict(
-                    num_bands=32,
-                    max_resolution=(NUM_FRAMES, IMG_SZ , IMG_SZ),
-                    sine_only=False,
-                    concat_pos=True,
-                ),
-                n_extra_pos_mlp=0,  
-                prep_type='patches',
-                spatial_downsample=4,
-                temporal_downsample=1              
-                ),
+              position_encoding_type='fourier',
+              fourier_position_encoding_kwargs=dict(
+                  num_bands=32,
+                  max_resolution=(NUM_FRAMES, IMG_SZ, IMG_SZ),
+                  sine_only=False,
+                  concat_pos=True,
+              ),
+              n_extra_pos_mlp=0,
+              prep_type='patches',
+              spatial_downsample=4,
+              temporal_downsample=1),
+            # shape now : (B, 16, 6, 6, 256*4*4)
             'label': io_processors.OneHotPreprocessor(),
         },
         mask_probs={'image': 0.0, 'label': 1.0},
         )
     encoder = perceiver.PerceiverEncoder(**perceiver_kwargs['encoder'])
+    
+    subsampled_index_dims = {      
+      'image': subsampling['image'].shape[0],
+      'label': 1,
+    }
+    
     decoder = perceiver.MultimodalDecoder(
         subsampled_index_dims=subsampled_index_dims,
         modalities={
                 'image': perceiver.BasicVideoAutoencodingDecoder(
-                    concat_preprocessed_input=False,  
-                    subsampled_index_dims=subsampling['image'],                  
+                    concat_preprocessed_input=False,
+                    subsampled_index_dims=subsampling['image'],                    
                     output_shape=inputs.shape[:4],
                     num_z_channels=1024,
                     output_num_channels=512,
@@ -321,6 +307,8 @@ class Experiment(experiment.AbstractExperiment):
     return model({'image': inputs,                
                 'label': np.zeros((inputs.shape[0], 600))},
                is_training=is_training, subsampled_output_points=subsampling)
+    
+ 
 
   #  _             _
   # | |_ _ __ __ _(_)_ __
@@ -345,11 +333,10 @@ class Experiment(experiment.AbstractExperiment):
 
     scalars = jl_utils.get_first(scalars)
     
-    # Save final checkpoint.
+    # Save checkpoints in npy:
     
     global_step_value = jl_utils.get_first(global_step)
-    # logging.info('training_steps %d', FLAGS.config.get('training_steps', 1) )
-    
+ 
     if (global_step_value  % FLAGS.config.save_checkpoint_interval  == 0) or ( global_step_value == FLAGS.config.get('training_steps', 1) - 1 ):
     
       if global_step_value  % FLAGS.config.save_checkpoint_interval == 0 :
@@ -385,26 +372,25 @@ class Experiment(experiment.AbstractExperiment):
     # Check we haven't already restored params
     if self._params is None:
       logging.info('Initializing parameters.')
-
-      inputs = next(self._train_input)
       
+      inputs = next(self._train_input)      
       nchunks = 128
-      
+         
       image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
       subsampling = {
             'image': jnp.arange(
-                image_chunk_size * 0 , image_chunk_size * ( 1)),
+                image_chunk_size * 0 , image_chunk_size * (1)),
             
             'label': None,
         }
     
-      init_net = jax.pmap(lambda *a: self.forward.init(*a, subsampling=subsampling,is_training=True)) # subsampling=subsampling, ))
+      init_net = jax.pmap(lambda *a: self.forward.init(*a,  subsampling=subsampling, is_training=True))
       init_opt = jax.pmap(self._optimizer.init)
-
       # Init uses the same RNG key on all hosts+devices to ensure everyone
       # computes the same initial state.
       init_rng = jl_utils.bcast_local_devices(self.init_rng)
-
+      
+      
       self._params, self._state = init_net(init_rng, inputs)
       self._opt_state = init_opt(self._params)
 
@@ -443,19 +429,6 @@ class Experiment(experiment.AbstractExperiment):
     """One-hot encoding potentially over a sequence of labels."""
     y = jax.nn.one_hot(value, self.config.data.num_classes)
     return y
-  
-  # def decode_all_batches(self,bached_videos):
-  #   i = 0 
-  #   jtensor = jnp.array(bached_videos)  
-  #   for video in jtensor:     
-  #     if i == 0 :
-  #       new_t = [dencode(vqgan_model, video)]
-  #       # print("init here: ",len(new_t))
-  #     else:
-  #       new_t.append(dencode(vqgan_model, video))
-  #     i += 1
-  #   final = jnp.stack(new_t)
-  #   return final
 
   def _loss_fn(
       self,
@@ -464,42 +437,37 @@ class Experiment(experiment.AbstractExperiment):
       inputs: dataset.Batch,
       rng: jnp.ndarray,
   ) -> Tuple[jnp.ndarray, Tuple[Scalars, hk.State]]:
-
+ 
     nchunks = 128
-    reconstruction = {}    
+    reconstruction = {}
+    
+    # get the input in chunks to do forward() - subsampling gives the indices of chunks
+    # slices of (B,2,6,6,256) - concatenate at the end
+    # subsampling['image'] = 2*6*6 = 72
+    # 72*128  = 16*24*24
+    
     for chunk_idx in range(nchunks):
-        image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
-        
-        subsampling = {
-            'image': jnp.arange(
-                image_chunk_size * chunk_idx, image_chunk_size * (chunk_idx + 1)),
-           
-            'label': None,
-        }
-        
-        output, state = self.forward.apply(
-            params, state, rng, inputs, subsampling=subsampling, is_training=True)
-    
-        reconstruction['label'] = output['label']
-        if 'image' not in reconstruction:
-            reconstruction['image'] = output['image']
-            
-        else:
-            reconstruction['image'] = jnp.concatenate(
-                [reconstruction['image'], output['image']], axis=1)
+      image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks    
+      subsampling = {
+          'image': jnp.arange(
+              image_chunk_size * chunk_idx, image_chunk_size * (chunk_idx + 1)),
           
-   
+          'label': None,
+      }
+      output, state = self.forward.apply(
+          params, state, rng, inputs, is_training=True, subsampling=subsampling)
+      
+      reconstruction['label'] = output['label']
+             
+      if 'image' not in reconstruction:
+        reconstruction['image'] = output['image']
+
+      else:
+        reconstruction['image'] = jnp.concatenate(
+            [reconstruction['image'], output['image']], axis=1)
+ 
+
     reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs['images'].shape)
-    
-    print("shape reconstruction[image]: ", reconstruction['image'].shape)
-    logging.info("type reconstruction[image]: %s",   reconstruction['image'].shape)
-    # print("shape: ", jnp.asarray(reconstruction['image']) )
-    print("type label: ", type (reconstruction['label']))
-   
-    # all_pixel_images = self.decode_batch(reconstruction['image'])
-       
-    # logging.info('shape: %s',  all_pixel_images.shape)
-    
     
     label = self._one_hot(inputs['labels'])
     
@@ -513,22 +481,12 @@ class Experiment(experiment.AbstractExperiment):
       smooth_negatives = label_smoothing / self.config.data.num_classes
       label = smooth_positives * label + smooth_negatives
 
-
-######## New stuff here ###################
     loss_w_batch_class = utils.softmax_cross_entropy(reconstruction['label'], label)
-    print('recon[label] %s',  reconstruction['label'])
-    logging.info('recon[label] shape %s', reconstruction['label'].shape)
-    
-    loss_w_batch_images =  utils.l1_loss(reconstruction['image'], inputs['images'])
-    #utils.l1_loss(reconstruction['image'], inputs['images'])
-    logging.info('l1 loss shape: %s', loss_w_batch_images.shape)
-    
-    loss_images = loss_w_batch_images
+    loss_images = utils.l1_loss(reconstruction['image'], inputs['images'])
+        
     loss_class = jnp.mean(loss_w_batch_class, dtype=loss_w_batch_class.dtype)
     
-    logging.info('class shape: %s', loss_class.shape)
-    
-    loss = 0.03*loss_images + 1.0* loss_class
+    loss = 2.0*loss_images + 1.0* loss_class
     
     scaled_loss = loss / jax.device_count()
 
@@ -609,39 +567,37 @@ class Experiment(experiment.AbstractExperiment):
       rng: jnp.ndarray,
   ) -> Scalars:
     """Evaluates a batch."""
-    nchunks = 128
+    nchunks = 128    
     reconstruction = {}
     for chunk_idx in range(nchunks):
-        image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks
-        
-        subsampling = {
-            'image': jnp.arange(
-                image_chunk_size * chunk_idx, image_chunk_size * (chunk_idx + 1)),
-            
-            'label': None,
-        }
-        output, _ = self.forward.apply(
-            params, state, rng, inputs, subsampling, is_training=False)
-        reconstruction['label'] = output['label']
-        if 'image' not in reconstruction:
-            reconstruction['image'] = output['image']
-            
-        else:
-            reconstruction['image'] = jnp.concatenate(
-                [reconstruction['image'], output['image']], axis=1)
-           
-                 
+      image_chunk_size = np.prod(inputs['images'].shape[1:-1]) // nchunks    
+      subsampling = {
+          'image': jnp.arange(
+              image_chunk_size * chunk_idx, image_chunk_size * (chunk_idx + 1)),
+          
+          'label': None,
+      }
+      output, state = self.forward.apply(
+          params, state, rng, inputs, is_training=True, subsampling=subsampling)
+      
+      reconstruction['label'] = output['label']
+             
+      if 'image' not in reconstruction:
+        reconstruction['image'] = output['image']
+
+      else:
+        reconstruction['image'] = jnp.concatenate(
+            [reconstruction['image'], output['image']], axis=1)
+ 
+
     reconstruction['image'] = jnp.reshape(reconstruction['image'], inputs['images'].shape)
-    
-    
     ### New stuff here ##############
 
     labels = self._one_hot(inputs['labels'])
     loss_class = utils.softmax_cross_entropy(reconstruction['label'], labels)
     loss_images = utils.l1_loss(reconstruction['image'], inputs['images'])
-    #utils.l1_loss(reconstruction['image'], inputs['images'])
     
-    loss = 0.03*loss_images + 1.0* loss_class
+    loss = 2.0*loss_images + 1.0* loss_class
 
     metrics = utils.topk_correct(reconstruction['label'], inputs['labels'], prefix='')
     metrics = jax.tree_util.tree_map(jnp.mean, metrics)
